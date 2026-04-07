@@ -1,0 +1,459 @@
+{
+  "version": "2.0.0",
+  "metadata": {
+    "name": "ViT based",
+    "description": "",
+    "schemaVersion": "2.0.0",
+    "createdAt": "2026-04-02T04:42:51.081Z",
+    "updatedAt": 1775104971.085142,
+    "exportSource": "FlowHamster"
+  },
+  "modelGraph": {
+    "kind": "model",
+    "nodes": [
+      {
+        "id": "input",
+        "data": {
+          "nodeType": "input",
+          "label": "Input",
+          "params": {
+            "shape": "3, 224, 224",
+            "dtype": "float32"
+          }
+        },
+        "position": {
+          "x": 92,
+          "y": 24
+        },
+        "type": "inputNode",
+        "style": {},
+        "width": 170,
+        "height": 129,
+        "selected": false,
+        "positionAbsolute": {
+          "x": 92,
+          "y": 24
+        },
+        "dragging": false
+      },
+      {
+        "id": "patch_embed",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "PatchEmbed",
+          "params": {
+            "in_channels": 3,
+            "out_channels": 768,
+            "kernel_size": 16,
+            "stride": 16,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 80
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "flatten",
+        "data": {
+          "nodeType": "flatten",
+          "label": "Flatten",
+          "params": {
+            "start_dim": 2,
+            "end_dim": 3
+          }
+        },
+        "position": {
+          "x": 660,
+          "y": 80
+        },
+        "type": "flattenNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "permute",
+        "data": {
+          "nodeType": "permute",
+          "label": "Permute",
+          "params": {
+            "dims": "0,2,1"
+          }
+        },
+        "position": {
+          "x": 940,
+          "y": 80
+        },
+        "type": "permuteNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "cls_token",
+        "data": {
+          "nodeType": "parameter",
+          "label": "CLS Token",
+          "params": {
+            "shape": "1,1,768",
+            "trainable": true
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 200
+        },
+        "type": "parameterNode",
+        "style": {},
+        "width": 140,
+        "height": 73
+      },
+      {
+        "id": "concat",
+        "data": {
+          "nodeType": "concat",
+          "label": "Concat CLS",
+          "params": {
+            "dim": 1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 200
+        },
+        "type": "concatNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "pos_embed",
+        "data": {
+          "nodeType": "parameter",
+          "label": "Pos Embed",
+          "params": {
+            "shape": "1,197,768",
+            "trainable": true
+          }
+        },
+        "position": {
+          "x": 660,
+          "y": 200
+        },
+        "type": "parameterNode",
+        "style": {},
+        "width": 140,
+        "height": 73
+      },
+      {
+        "id": "add_pos",
+        "data": {
+          "nodeType": "add",
+          "label": "Add Pos",
+          "params": {}
+        },
+        "position": {
+          "x": 940,
+          "y": 200
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "dropout",
+        "data": {
+          "nodeType": "dropout",
+          "label": "Dropout",
+          "params": {
+            "p": 0.1
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 320
+        },
+        "type": "dropoutNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "encoder",
+        "data": {
+          "nodeType": "transformerencoder",
+          "label": "TransformerEncoder",
+          "params": {
+            "embed_dim": 768,
+            "num_heads": 12,
+            "num_layers": 12,
+            "dim_feedforward": 3072,
+            "dropout": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 320
+        },
+        "type": "transformerencoderNode",
+        "style": {},
+        "width": 417,
+        "height": 75
+      },
+      {
+        "id": "norm_out",
+        "data": {
+          "nodeType": "layernorm",
+          "label": "LayerNorm",
+          "params": {
+            "normalized_shape": 768,
+            "eps": 1e-06
+          }
+        },
+        "position": {
+          "x": 660,
+          "y": 320
+        },
+        "type": "layernormNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "cls_slice",
+        "data": {
+          "nodeType": "slice",
+          "label": "Extract CLS",
+          "params": {
+            "start": 0,
+            "end": 1,
+            "dim": 1
+          }
+        },
+        "position": {
+          "x": 940,
+          "y": 320
+        },
+        "type": "sliceNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "squeeze",
+        "data": {
+          "nodeType": "squeeze",
+          "label": "Squeeze",
+          "params": {
+            "dim": 1
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 440
+        },
+        "type": "squeezeNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "head",
+        "data": {
+          "nodeType": "linear",
+          "label": "Head",
+          "params": {
+            "in_features": 768,
+            "out_features": 1000,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 440
+        },
+        "type": "linearNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "output",
+        "data": {
+          "nodeType": "output",
+          "label": "Output",
+          "params": {}
+        },
+        "position": {
+          "x": 660,
+          "y": 440
+        },
+        "type": "outputNode",
+        "style": {},
+        "width": 140,
+        "height": 93
+      }
+    ],
+    "edges": [
+      {
+        "source": "input",
+        "target": "patch_embed",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "patch_embed",
+        "target": "flatten",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "flatten",
+        "target": "permute",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "permute",
+        "target": "concat",
+        "sourceHandle": "result",
+        "targetHandle": "in_0"
+      },
+      {
+        "source": "cls_token",
+        "target": "concat",
+        "sourceHandle": "result",
+        "targetHandle": "in_1"
+      },
+      {
+        "source": "concat",
+        "target": "add_pos",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "pos_embed",
+        "target": "add_pos",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "source": "add_pos",
+        "target": "dropout",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "dropout",
+        "target": "encoder",
+        "sourceHandle": "result",
+        "targetHandle": "x"
+      },
+      {
+        "source": "encoder",
+        "target": "norm_out",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "norm_out",
+        "target": "cls_slice",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "cls_slice",
+        "target": "squeeze",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "squeeze",
+        "target": "head",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "source": "head",
+        "target": "output",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      }
+    ],
+    "contract": {
+      "inputs": [
+        {
+          "name": "input_1",
+          "dtype": "float32",
+          "shapeHint": "3, 224, 224",
+          "semanticRole": "model_input",
+          "description": "Input"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output_1",
+          "semanticRole": "model_output",
+          "description": "Output"
+        }
+      ]
+    }
+  },
+  "dataGraph": {
+    "kind": "data",
+    "nodes": [],
+    "edges": [],
+    "contract": {
+      "inputs": [],
+      "outputs": []
+    }
+  },
+  "trainingConfig": {
+    "taskType": "classification",
+    "loss": {
+      "type": "cross_entropy",
+      "enabled": true,
+      "params": {}
+    },
+    "optimizer": {
+      "type": "adamw",
+      "enabled": true,
+      "params": {
+        "lr": 0.001,
+        "weight_decay": 0
+      }
+    },
+    "scheduler": {
+      "type": "step_lr",
+      "enabled": false,
+      "params": {
+        "step_size": 10,
+        "gamma": 0.1
+      }
+    },
+    "metrics": [],
+    "runtime": {
+      "device": "auto",
+      "epochs": 10,
+      "batchSize": 32,
+      "amp": false,
+      "gradClip": null,
+      "numWorkers": 0
+    },
+    "checkpoint": {
+      "enabled": false,
+      "saveTopK": 3,
+      "monitor": "val_loss",
+      "mode": "min",
+      "earlyStopPatience": null
+    }
+  },
+  "bindings": []
+}

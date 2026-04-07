@@ -1,0 +1,49 @@
+:root {
+  font-family: 'Segoe UI', sans-serif;
+  background: #0a0a0a;
+  color: #e0e0e0;
+  margin: 0;
+  padding: 0;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+#root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* React Flow dark theme overrides */
+.react-flow__background {
+  background: #0a0a0a;
+}
+
+.react-flow__controls {
+  background: #1a1a1a;
+  border: 1px solid #333;
+}
+
+.react-flow__controls button {
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border-bottom: 1px solid #333;
+}
+
+.react-flow__controls button:hover {
+  background: #2a2a2a;
+}
+
+.react-flow__minimap {
+  background: #111;
+  border: 1px solid #333;
+}

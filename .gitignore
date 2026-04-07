@@ -1,0 +1,12 @@
+node_modules/
+.venv*/
+*.venv*
+__pycache__/
+*.pyc
+backups/
+*.tar.gz
+*.backup_*/
+dist-test/
+.DS_Store
+.claude/
+*.md
