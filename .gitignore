@@ -9,4 +9,3 @@ backups/
 dist-test/
 .DS_Store
 .claude/
-*.md
