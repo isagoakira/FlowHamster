@@ -310,15 +310,27 @@ export function expandPackage(
   const baseX = groupNode.position.x
   const baseY = groupNode.position.y
 
-  // 恢复内部节点（使用原始位置）
+  // Build a mapping: composite sub-nodes get fresh instance IDs to avoid
+  // collisions when the same composite class has multiple instances.
+  // Regular nodes keep their original IDs.
+  const idMap = new Map<string, string>()
+  for (const sub of internalStructure) {
+    if ((sub as any).customClassId) {
+      // Composite sub-node: assign a fresh instance ID
+      idMap.set(sub.id, `${(sub as any).customClassId}_instance_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`)
+    }
+    // else: keep original node ID
+  }
+
+  // 恢复内部节点（使用原始位置，composite 子节点使用新 ID）
   const internalNodes: FlowHamsterNode[] = internalStructure.map((sub) => {
-    // 如果有原始位置，使用原始位置；否则使用基于包节点位置的计算
+    const newId = idMap.get(sub.id) ?? sub.id
     const position = sub.position || {
       x: baseX + 220,
       y: baseY + 60,
     }
-    return {
-      id: sub.id,
+    const baseNode: FlowHamsterNode = {
+      id: newId,
       type: getNodeComponentType(sub.type),
       position,
       data: {
@@ -329,6 +341,15 @@ export function expandPackage(
       parentNode: groupNode.id,
       extent: 'parent',
     } as FlowHamsterNode
+
+    // If it's a nested composite, preserve its class identity and mark non-expanded
+    if ((sub as any).customClassId) {
+      ;(baseNode.data as any).isCustomComposite = true
+      ;(baseNode.data as any).customClassId = (sub as any).customClassId
+      ;(baseNode.data as any).isExpanded = false
+    }
+
+    return baseNode
   })
 
   // 恢复外部边（使用边界边信息，重定向到内部节点）
@@ -341,7 +362,7 @@ export function expandPackage(
         restoredExternalEdges.push({
           id: be.originalEdgeId,
           source: be.source,
-          target: be.internalNodeId, // 重定向到内部节点
+          target: idMap.get(be.internalNodeId) ?? be.internalNodeId, // 重定向到内部节点
           sourceHandle: be.sourceHandle,
           targetHandle: be.internalHandle,
         })
@@ -349,7 +370,7 @@ export function expandPackage(
         // 输出边：内部 -> 外部，重定向到内部节点 -> 外部
         restoredExternalEdges.push({
           id: be.originalEdgeId,
-          source: be.internalNodeId, // 重定向到内部节点
+          source: idMap.get(be.internalNodeId) ?? be.internalNodeId, // 重定向到内部节点
           target: be.target,
           sourceHandle: be.internalHandle,
           targetHandle: be.targetHandle,
@@ -379,14 +400,14 @@ export function expandPackage(
   const allRemovedEdgeIds = new Set([...internalEdgeIdSet, ...boundaryEdgeIds])
   const filteredEdges = allEdges.filter((e) => !allRemovedEdgeIds.has(e.id))
 
-  // 恢复内部边（保留原始 ID）
+  // 恢复内部边（使用新 ID 映射）
   // 检查是否已存在同名边，避免重复添加（处理重新展开的情况）
   const existingEdgeIds = new Set(filteredEdges.map(e => e.id))
   const internalEdgeList: FlowHamsterEdge[] = storedEdges
     .map((edge) => ({
       id: `e_${edge.from}_${edge.to}`,
-      source: edge.from,
-      target: edge.to,
+      source: idMap.get(edge.from) ?? edge.from,
+      target: idMap.get(edge.to) ?? edge.to,
       sourceHandle: edge.fromHandle,
       targetHandle: edge.toHandle,
     }))
@@ -453,7 +474,7 @@ export function collapsePackage(
  * 解包组，完全还原为普通节点
  * 恢复所有原始边 ID 和节点位置
  */
-export function unpackageGroup(
+export function fullyUnpackageGroup(
   groupId: string,
   allNodes: FlowHamsterNode[],
   allEdges: FlowHamsterEdge[]
@@ -469,15 +490,24 @@ export function unpackageGroup(
   const data = groupNode.data as CustomCompositeNodeData
   const { internalStructure, internalEdges: storedEdges, boundaryEdges } = data
 
-  // 恢复内部节点（使用原始位置）
+  // Build ID map: give composite sub-nodes fresh instance IDs to avoid
+  // collisions with other instances of the same class elsewhere in the graph.
+  const idMap = new Map<string, string>()
+  for (const sub of internalStructure) {
+    if ((sub as any).customClassId) {
+      idMap.set(sub.id, `${(sub as any).customClassId}_instance_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`)
+    }
+  }
+
+  // 恢复内部节点（使用原始位置，composite 子节点使用新 ID）
   const restoredNodes: FlowHamsterNode[] = internalStructure.map((sub) => {
-    // 如果有原始位置，使用原始位置；否则使用基于包节点位置的计算
+    const newId = idMap.get(sub.id) ?? sub.id
     const position = sub.position || {
       x: groupNode.position.x + 220,
       y: groupNode.position.y + 60,
     }
-    return {
-      id: sub.id,
+    const base: FlowHamsterNode = {
+      id: newId,
       type: getNodeComponentType(sub.type),
       position,
       data: {
@@ -486,26 +516,35 @@ export function unpackageGroup(
         params: { ...sub.params },
       },
     } as FlowHamsterNode
+
+    // If it's a nested composite, preserve class identity as collapsed instance
+    if ((sub as any).customClassId) {
+      ;(base.data as any).isCustomComposite = true
+      ;(base.data as any).customClassId = (sub as any).customClassId
+      ;(base.data as any).isExpanded = false
+    }
+
+    return base
   })
 
-  // 恢复内部边（保留原始 ID）
+  // 恢复内部边（使用新 ID 映射）
   const restoredEdges: FlowHamsterEdge[] = storedEdges.map((edge) => ({
     id: `e_${edge.from}_${edge.to}`,
-    source: edge.from,
-    target: edge.to,
+    source: idMap.get(edge.from) ?? edge.from,
+    target: idMap.get(edge.to) ?? edge.to,
     sourceHandle: edge.fromHandle,
     targetHandle: edge.toHandle,
   }))
 
-  // 恢复外部边（使用边界边信息，保留原始 ID）
+  // 恢复外部边（使用边界边信息，保留原始 ID，内部引用使用新 ID）
   if (boundaryEdges) {
     for (const be of boundaryEdges as BoundaryEdgeData[]) {
       restoredEdges.push({
-        id: be.originalEdgeId, // 保留原始 ID
+        id: be.originalEdgeId,
         source: be.source,
-        target: be.target,
+        target: idMap.get(be.internalNodeId) ?? be.internalNodeId,
         sourceHandle: be.sourceHandle,
-        targetHandle: be.targetHandle,
+        targetHandle: be.internalHandle,
       })
     }
   }

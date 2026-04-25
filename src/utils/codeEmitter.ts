@@ -570,9 +570,10 @@ export function genInit(block: NodeBlock): string | null {
       const dState = f.d_state ?? 16
       const dConv = f.d_conv ?? 4
       const expand = f.expand ?? 2
+      const dtRank = (f.dt_rank === 0 || f.dt_rank == null) ? 'auto' : String(f.dt_rank)
       const nLayers = f.n_layers ?? 1
       const dropout = f.dropout ?? 0.0
-      return `self.${name} = Mamba(d_model=${d}, d_state=${dState}, d_conv=${dConv}, expand=${expand}, n_layers=${nLayers}, dropout=${dropout})`
+      return `self.${name} = Mamba(d_model=${d}, d_state=${dState}, d_conv=${dConv}, expand=${expand}, dt_rank="${dtRank}", dropout=${dropout}, n_layers=${nLayers})`
     }
     case 'lstm': {
       const inp = f.input_size ?? 512

@@ -9,7 +9,7 @@ import {
 import { getNodeComponentType, normalizeNodeData } from '../utils/nodeType'
 import { validateTemplateWithMessages } from '../utils/templateValidator'
 import { adaptBackendTemplate } from '../utils/adapters/templateAdapter'
-import { packageNodes, expandPackage, collapsePackage, unpackageGroup } from '../utils/subgraphPackager'
+import { packageNodes, expandPackage, collapsePackage, fullyUnpackageGroup } from '../utils/subgraphPackager'
 import { registerCustomClass, updateCustomClass, getAllCustomClasses } from '../utils/customCompositeRegistry'
 import { SubModule, InternalEdge } from '../utils/nodeRegistry'
 import { WorkflowBinding, WorkflowTrainingConfig } from '../schema/workflowDocument'
@@ -491,7 +491,9 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   packageSelection: () => {
     const state = get()
     const selectedNodes = state.nodes.filter(
-      (node) => state.selectedNodeIds.includes(node.id) && !isGroupNode(node)
+      (node) => state.selectedNodeIds.includes(node.id) &&
+        !isGroupNode(node) &&
+        !(node.data as any)?.isCustomComposite  // exclude already-packaged composites
     )
 
     if (selectedNodes.length < 2) return
@@ -645,22 +647,46 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   unpackageGroup: (groupId: string) => {
     const state = get()
-    const { nodes: newNodes, edges: newEdges } = unpackageGroup(
-      groupId,
-      state.nodes,
-      state.edges
+    const node = state.nodes.find(
+      (n) => n.id === groupId && (n.data as CustomCompositeNodeData)?.isCustomComposite
     )
+    if (!node) return
+
+    const { customClassId } = node.data as CustomCompositeNodeData
+
+    // Count how many instances of this class exist in the graph
+    const instanceCount = state.nodes.filter(
+      (n) => (n.data as CustomCompositeNodeData)?.isCustomComposite &&
+             (n.data as CustomCompositeNodeData).customClassId === customClassId
+    ).length
 
     get().pushHistory()
-    set((store) => {
-      store.rfSetNodes?.(newNodes)
-      store.rfSetEdges?.(newEdges)
-      return {
-        nodes: newNodes,
-        edges: newEdges,
-        selectedNodeIds: [],
-      }
-    })
+
+    if (instanceCount === 1) {
+      // Single instance: fully dissolve into individual nodes
+      const { nodes: newNodes, edges: newEdges } = fullyUnpackageGroup(
+        groupId,
+        state.nodes,
+        state.edges
+      )
+      set((store) => {
+        store.rfSetNodes?.(newNodes)
+        store.rfSetEdges?.(newEdges)
+        return { nodes: newNodes, edges: newEdges, selectedNodeIds: [] }
+      })
+    } else {
+      // Multiple instances: expand only this instance in-place
+      const { nodes: newNodes, edges: newEdges } = expandPackage(
+        node as any,
+        state.nodes,
+        state.edges
+      )
+      set((store) => {
+        store.rfSetNodes?.(newNodes)
+        store.rfSetEdges?.(newEdges)
+        return { nodes: newNodes, edges: newEdges, selectedNodeIds: [groupId] }
+      })
+    }
   },
 
   renamePackage: (groupId: string, newName: string) => {
@@ -689,26 +715,26 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const oldClassName = (node.data as CustomCompositeNodeData).customClassId
     if (oldClassName === newClassName) return
 
-    // 查找要重命名的类（通过 oldClassName 找到对应的 ID）
+    // Update class name in the registry
     const allClasses = getAllCustomClasses()
     const classToRename = allClasses.find(c => c.name === oldClassName)
-
     if (classToRename) {
-      // 更新 custom class registry 中的类名
       updateCustomClass(classToRename.id, { name: newClassName })
     }
 
-    // 更新所有使用该类的节点（包括 id 和 customClassId）
+    // Update all instances: keep node IDs stable (critical!), only update class ref and label
     const newNodes = state.nodes.map((n) => {
       if ((n.data as CustomCompositeNodeData)?.isCustomComposite &&
           (n.data as CustomCompositeNodeData).customClassId === oldClassName) {
-        const newData = {
-          ...n.data,
-          customClassId: newClassName,
-          label: newClassName,  // 类名更新后显示名也更新
+        // node.id is NOT changed — edges reference it by id, must stay stable
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            customClassId: newClassName,
+            label: newClassName,
+          },
         }
-        // 同时更新节点的 id，确保与 customClassId 保持一致
-        return { ...n, id: newClassName, data: newData }
       }
       return n
     })

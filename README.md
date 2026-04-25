@@ -7,16 +7,37 @@ A PyTorch visual modeling tool with ComfyUI-like logic. Build neural network mod
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi)
 ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=flat-square&logo=typescript)
 
-## Features
+---
 
-- **Visual Node Editor** - Drag-and-drop interface for building neural network architectures
-- **Code Generation** - Export your graph to production-ready PyTorch code
-- **Real-time Preview** - Execute forward pass and view tensor outputs
-- **Training Support** - Configure and run training loops with gradient analysis
-- **Template Library** - Pre-built templates for ResNet, VGG, MobileNet, LeNet, ViT
-- **Dual Graph System** - Separate model architecture and data pipeline graphs
+## Table of Contents
 
-## Tech Stack
+- [Project Overview](#project-overview)
+- [Technical Architecture](#technical-architecture)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Project Structure](#project-structure)
+
+---
+
+## Project Overview
+
+FlowHamster is a visual PyTorch modeling tool that allows users to build neural network architectures through a drag-and-drop node-based interface and generate executable PyTorch code.
+
+### Core Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Dual Graph System** | Separates model architecture (modelGraph) from data preprocessing pipeline (dataGraph) |
+| **Node Editor** | 48+ model nodes and 80+ data pipeline nodes |
+| **Code Generation** | Graph → PyTorch nn.Module code via AST-based generator |
+| **Subgraph Packaging** | Package selected nodes into reusable composite modules |
+| **Real-time Preview** | WebSocket-powered live code generation and execution |
+
+---
+
+## Technical Architecture
+
+### Tech Stack
 
 | Layer | Technology |
 |-------|------------|
@@ -25,7 +46,129 @@ A PyTorch visual modeling tool with ComfyUI-like logic. Build neural network mod
 | Desktop | Tauri |
 | ML | PyTorch |
 
-## Getting Started
+### Frontend Architecture
+
+```
+src/
+├── components/           # React components
+│   ├── canvas/          # Canvas (ReactFlow), NodeEditPanel
+│   ├── nodes/           # 50+ node components
+│   ├── data/            # Data pipeline canvas
+│   ├── toolbar/         # Toolbar (training config, bindings)
+│   ├── sidebar/         # Sidebar (node palette)
+│   └── codePreview/     # Code preview panel
+├── hooks/               # Zustand store hooks
+│   ├── useGraphStore.ts # Model graph state (nodes, edges, undo/redo)
+│   └── useDataGraphStore.ts
+├── stores/              # State management
+│   ├── useWorkflowStore.ts  # Workflow persistence
+│   └── useTemplateStore.ts  # Template loading
+└── utils/               # Core utilities
+    ├── nodeRegistry.ts      # Model node definitions (48+)
+    ├── dataNodeRegistry.ts  # Data node definitions (80+)
+    ├── codeGenerator.ts     # Code generation orchestrator
+    ├── codeEmitter.ts       # Code emitter (init/forward/loss)
+    ├── astBuilder.ts        # AST builder
+    ├── subgraphPackager.ts  # Subgraph packaging
+    └── customCompositeRegistry.ts
+```
+
+**State Management (Zustand)**:
+
+| Store | Responsibility |
+|-------|----------------|
+| `useGraphStore` | Model graph state (nodes, edges, selection, undo/redo, clipboard) |
+| `useDataGraphStore` | Data pipeline graph state |
+| `useWorkflowStore` | Workflow persistence (IndexedDB) |
+| `useTemplateStore` | Template loading state |
+
+### Backend Architecture
+
+```
+backend/
+├── main.py              # FastAPI entry point
+├── routers/             # API routes
+│   ├── generate.py      # /api/generate
+│   ├── execute.py       # /api/execute/*
+│   ├── websocket.py     # /ws/code
+│   ├── export.py        # /api/export
+│   ├── templates.py     # /api/templates
+│   └── workflows.py     # /api/workflows
+├── services/            # Business logic
+│   ├── ast_core.py      # AST code generation core
+│   ├── code_gen_v2.py   # Code generator v2
+│   ├── dataflow_compiler.py
+│   ├── gradient_analyzer.py
+│   └── tensor_executor.py
+└── templates/           # Model templates (ResNet, VGG, etc.)
+```
+
+### Code Generation Pipeline
+
+```
+User Edit → [300ms debounce] → Local Generation OR WebSocket Push
+                                              ↓
+                                    getExecutableGraph()
+                                              ↓
+                                    pruneGraph() → reachable nodes
+                                              ↓
+                                    buildAST() → topological sort
+                                              ↓
+                                    For each block:
+                                      - if composite: genCompositeInit/Forward
+                                      - else: genInit + genForward
+                                              ↓
+                                    + Training Config + Loss + Evaluation
+                                              ↓
+                                    Full Python Module
+```
+
+---
+
+## Features
+
+### Model Nodes (48+ types)
+
+| Category | Nodes |
+|----------|-------|
+| Input/Output | `input`, `output` |
+| Convolution/Linear | `conv1d`, `conv2d`, `conv3d`, `linear`, `embedding` |
+| Activation | `relu`, `gelu`, `silu`, `sigmoid`, `tanh`, `leakyrelu` |
+| Normalization | `batchnorm2d`, `layernorm`, `groupnorm` |
+| Pooling | `maxpool2d`, `avgpool2d`, `adaptiveavgpool2d`, `globalavgpool` |
+| Attention/Transformer | `selfattention`, `crossattention`, `multiheadattention`, `transformerencoder`, `transformerdecoder` |
+| State Space | `mamba` |
+| FFN/MLP | `ffn`, `mlp` |
+| Tensor Operations | `add`, `mul`, `concat`, `reshape`, `flatten`, `transpose`, `split`, `slice`, `squeeze`, `expand` |
+| Regularization | `dropout`, `droppath` |
+| Loss Functions | `crossentropyloss`, `mseloss`, `focalloss`, `labelsmoothing` |
+| Optimizers | `adam`, `adamw`, `sgd`, `rmsprop` |
+| Schedulers | `steplr`, `cosineannealinglr`, `reducelronplateau` |
+| Evaluation | `accuracy`, `f1`, `precision`, `recall`, `confusion_matrix`, `mean_iou`, `roc_auc` |
+
+### Data Pipeline Nodes (80+ types)
+
+| Category | Examples |
+|----------|----------|
+| Sources | `folder_source`, `csv_source`, `jsonl_source`, `parquet_source`, `huggingface_source` |
+| Readers | `read_image`, `read_video`, `read_audio`, `read_text` |
+| Transforms | `resize`, `crop`, `flip`, `rotate`, `pad`, `normalize`, `to_tensor`, `scale` |
+| Augmentation | `random_horizontal_flip`, `random_crop`, `color_jitter`, `gaussian_blur` |
+| Audio | `stft`, `spectrogram`, `melspectrogram`, `mfcc` |
+| NLP | `tokenizer`, `truncate`, `add_special_tokens`, `random_mask` |
+| Batch | `batch`, `collate`, `dataloader` |
+
+### Key Features
+
+- **Subgraph Packaging**: Package selected nodes into reusable composite modules
+- **Implicit Concat**: Auto-creates concat nodes when multiple edges target the same port
+- **Multi-Output Branch Coloring**: Visual branch differentiation for multi-output models
+- **Data-Model Binding**: Bind data pipeline outputs to model inputs
+- **Template Library**: Pre-built templates for ResNet, VGG, MobileNet, LeNet, ViT
+
+---
+
+## Quick Start
 
 ### Prerequisites
 
@@ -59,7 +202,7 @@ npm run dev
 **Start Backend:**
 ```bash
 cd backend
-PYTHONPATH=. python3 -m uvicorn main:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 # API at http://localhost:8000
 # Docs at http://localhost:8000/docs
 ```
@@ -67,70 +210,109 @@ PYTHONPATH=. python3 -m uvicorn main:app --reload --port 8000
 ### Build
 
 ```bash
-npm run build        # Frontend build
-npm run tauri:build  # Desktop app build
+npm run build        # TypeScript compile + Vite build
+npm run preview      # Preview build
+npx tsc --noEmit     # TypeScript type check
+npm test             # Run vitest tests
 ```
+
+---
 
 ## Project Structure
 
 ```
 FlowHamster/
-├── src/                    # React frontend
-│   ├── components/         # React components
-│   │   ├── nodes/          # Model node components (48 types)
-│   │   └── data/           # Data pipeline components
-│   ├── hooks/              # React hooks (Zustand stores)
-│   ├── stores/             # State management
-│   └── utils/              # Code generators, registries
-├── backend/                # FastAPI backend
-│   ├── modules/            # Custom PyTorch modules (Mamba, etc.)
-│   ├── routers/            # API routes
-│   ├── services/           # AST code generation core
-│   ├── schema/             # Data models
-│   └── templates/          # Model templates
-├── src-tauri/              # Tauri desktop app
-└── workflows/              # Example workflows
+├── src/                          # React frontend
+│   ├── App.tsx                   # Root component
+│   ├── main.tsx                  # Entry point
+│   ├── components/               # React components
+│   │   ├── canvas/              # Canvas components
+│   │   │   ├── Canvas.tsx       # Model graph canvas (ReactFlow)
+│   │   │   ├── CompositeCanvas.tsx
+│   │   │   └── NodeEditPanel.tsx
+│   │   ├── nodes/                # 50+ node components
+│   │   │   ├── BaseNode.tsx
+│   │   │   ├── Conv2dNode.tsx
+│   │   │   ├── SelfAttentionNode.tsx
+│   │   │   └── ...
+│   │   ├── data/                # Data pipeline components
+│   │   ├── toolbar/             # Toolbar (training config)
+│   │   ├── sidebar/             # Sidebar (node palette)
+│   │   ├── codePreview/         # Code preview panel
+│   │   └── dialogs/             # Dialogs
+│   ├── hooks/                    # Zustand store hooks
+│   │   ├── useGraphStore.ts     # Model graph state
+│   │   ├── useDataGraphStore.ts # Data graph state
+│   │   ├── useAutoLayout.ts
+│   │   └── useTensorExecutor.ts
+│   ├── stores/                   # State stores
+│   │   ├── useWorkflowStore.ts  # Workflow persistence
+│   │   └── useTemplateStore.ts  # Template loading
+│   ├── utils/                    # Core utilities
+│   │   ├── nodeRegistry.ts       # Model node definitions (48+)
+│   │   ├── dataNodeRegistry.ts   # Data node definitions (80+)
+│   │   ├── nodeComponentRegistry.ts
+│   │   ├── codeGenerator.ts      # Code generation orchestrator
+│   │   ├── codeEmitter.ts        # Code emitter
+│   │   ├── astBuilder.ts         # AST builder
+│   │   ├── graphPruner.ts        # Graph pruner
+│   │   ├── subgraphPackager.ts   # Subgraph packaging
+│   │   └── customCompositeRegistry.ts
+│   ├── types/                    # TypeScript types
+│   ├── schema/                   # Workflow document schema
+│   └── constants/                # Constants
+├── backend/                      # FastAPI backend
+│   ├── main.py                   # Entry point
+│   ├── routers/                  # API routes
+│   │   ├── generate.py           # Code generation
+│   │   ├── execute.py            # Execution
+│   │   ├── websocket.py          # WebSocket
+│   │   ├── export.py             # Export
+│   │   ├── templates.py          # Templates
+│   │   └── workflows.py          # Workflow CRUD
+│   ├── services/                 # Business logic
+│   │   ├── ast_core.py           # AST code generation
+│   │   ├── code_gen_v2.py
+│   │   ├── dataflow_compiler.py
+│   │   ├── gradient_analyzer.py
+│   │   └── tensor_executor.py
+│   ├── schema/                   # Python schemas
+│   └── templates/                # Model templates
+├── workflows/                    # Workflow JSON files
+├── docs/                         # Design documents
+└── README.md
 ```
 
-## Node Types
+### Key Files
 
-### Model Nodes (48 types)
-- **Layers**: Conv2d, Linear, LSTM, MultiheadAttention, TransformerEncoder/Decoder
-- **Activations**: ReLU, GELU, SiLU, Sigmoid, Tanh, LeakyReLU
-- **Normalization**: BatchNorm2d, LayerNorm, GroupNorm, InstanceNorm
-- **Pooling**: MaxPool2d, AvgPool2d, AdaptiveAvgPool2d
-- **Training**: SGD, Adam, AdamW, RMSprop, CosineAnnealing, StepLR
-- **Losses**: MSELoss, CrossEntropyLoss
-- **Special**: Mamba (SSM), FFN, MLP, DropPath, Embedding
+| File | Description |
+|------|-------------|
+| `src/utils/nodeRegistry.ts` | Model node registry (48+ node types) |
+| `src/utils/dataNodeRegistry.ts` | Data node registry (80+ node types) |
+| `src/utils/codeGenerator.ts` | Frontend code generation entry point |
+| `src/utils/codeEmitter.ts` | Code emitter (init/forward/loss/evaluation) |
+| `src/hooks/useGraphStore.ts` | Model graph state management |
+| `backend/services/ast_core.py` | Backend AST code generation core |
+| `backend/services/dataflow_compiler.py` | Data pipeline compiler |
 
-### Data Nodes (60+ types)
-Data pipeline components for loading, preprocessing, and transforming data.
+---
 
 ## API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/generate` | POST | Generate Python code from graph |
-| `/api/execute` | POST | Execute training code |
+| `/api/execute/execute` | POST | Execute training code |
 | `/api/execute/forward` | POST | Forward pass tensor preview |
 | `/api/execute/gradients` | POST | Gradient analysis |
 | `/api/export` | POST | Export as .py file |
+| `/api/export-notebook` | POST | Export as Jupyter Notebook |
 | `/api/templates` | GET | List available templates |
-| `/api/workflows` | GET/POST | Workflow CRUD |
-| `/ws` | WebSocket | Real-time communication |
+| `/api/workflows` | GET/POST | Workflow list/create |
+| `/api/workflows/{id}` | GET/PUT/DELETE | Workflow CRUD |
+| `/ws/code` | WebSocket | Real-time code generation |
 
-## Workflow
-
-```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Node Editor │────▶│ Code Generator │────▶│ PyTorch Code │
-└─────────────┘     └──────────────┘     └─────────────┘
-                           │                    │
-                           ▼                    ▼
-                    ┌──────────────┐     ┌─────────────┐
-                    │  Tensor Exec  │     │   Execute   │
-                    └──────────────┘     └─────────────┘
-```
+---
 
 ## License
 

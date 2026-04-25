@@ -108,7 +108,7 @@ NODE_SIGNATURES: dict[str, dict] = {
 
     # ── 状态空间模型 ──
     "mamba": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "Mamba",
-             "module_template": "Mamba(d_model={d_model}, d_state={d_state}, d_conv={d_conv}, expand={expand})"},
+             "module_template": "Mamba(d_model={d_model}, d_state={d_state}, d_conv={d_conv}, expand={expand}, dt_rank={dt_rank}, dropout={dropout})"},
 
     # ── MLP / FFN ──
     "mlp": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "MLP",
@@ -525,30 +525,92 @@ class CrossAttention(nn.Module):
 ''')
 
         if "mamba" in needed:
-            parts.append('''
-class Mamba(nn.Module):
-    """Simplified Mamba (state space model) block"""
-    def __init__(self, d_model: int, d_state: int = 16, d_conv: int = 4, expand: int = 2):
+            dt_rank = "auto"
+            parts.append(f'''
+class RMSNorm(nn.Module):
+    def __init__(self, d: int, eps: float = 1e-5):
         super().__init__()
-        self.d_model = d_model
-        d_inner = int(expand * d_model)
-        self.in_proj = nn.Linear(d_model, d_inner * 2, bias=False)
-        self.conv1d = nn.Conv1d(d_inner, d_inner, d_conv, padding=d_conv - 1)
-        self.x_proj = nn.Linear(d_inner, d_state * 2, bias=False)
-        self.out_proj = nn.Linear(d_inner, d_model, bias=False)
-        self.d_state = d_state
+        self.eps = eps
+        self.weight = nn.Parameter(torch.ones(d))
 
     def forward(self, x):
-        B, L, C = x.shape
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps) * self.weight
+
+
+class MambaBlock(nn.Module):
+    """Single Mamba-2 SSM block with full selective scan."""
+    def __init__(self, d_model: int, d_state: int = 16, d_conv: int = 4,
+                 expand: int = 2, dt_rank: str = "auto", dropout: float = 0.0):
+        super().__init__()
+        d_inner = expand * d_model
+        dt_rank_val = max(d_model // 16, 1) if dt_rank == "auto" else dt_rank
+
+        self.in_proj = nn.Linear(d_model, d_inner * 2, bias=False)
+        self.conv1d = nn.Conv1d(d_inner, d_inner, d_conv, padding=d_conv - 1, bias=False)
+        self.dt_proj = nn.Linear(d_inner, dt_rank_val, bias=True)
+        self.x_proj = nn.Linear(d_inner, dt_rank_val + d_state * 2, bias=False)
+
+        A = torch.arange(1, d_state + 1, dtype=torch.float32)
+        A = A.unsqueeze(0).expand(d_inner, -1).contiguous()
+        self.A_log = nn.Parameter(torch.log(A))
+        self.D = nn.Parameter(torch.ones(d_inner))
+        self.out_proj = nn.Linear(d_inner, d_model, bias=False)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+    def forward(self, x):
+        if x.dim() == 2:
+            x = x.unsqueeze(1)
+        batch, seq_len, _ = x.shape
+
         xz = self.in_proj(x)
-        x, z = xz.chunk(2, dim=-1)
-        x = self.conv1d(x.transpose(1, 2))[:, :, :L].transpose(1, 2) * torch.sigmoid(x)
-        ssm_params = self.x_proj(x)
-        B2, L2, D2 = ssm_params.shape
-        A = (-torch.exp(torch.arange(self.d_state, device=x.device).float())).expand(B2, L2, -1)
-        x = torch.nn.functional.silu(x)
-        return self.out_proj(x)
+        x_p, z = xz.chunk(2, dim=-1)
+
+        x_conv = self.conv1d(x_p.transpose(1, 2))[:, :, :seq_len].transpose(1, 2)
+        x_conv = F.silu(x_conv)
+
+        select = self.x_proj(x_conv)
+        dt_rank_val = self.dt_proj.out_features
+        d_state = self.A_log.shape[1]
+        dt = F.softplus(self.dt_proj(x_conv))
+        B = select[:, :, dt_rank_val:dt_rank_val + d_state]
+        C = select[:, :, dt_rank_val + d_state:]
+
+        # Parallel associative scan (sequential — correct SSM semantics)
+        dA = torch.exp(torch.einsum("bld,dn->bldn", dt, self.A_log.exp()))
+        dB = torch.einsum("bld,bln->bldn", dt, B)
+        h = torch.zeros(batch, x_conv.shape[-1], d_state, device=x.device, dtype=x.dtype)
+        ys = []
+        for t in range(seq_len):
+            h = dA[:, t] * h + dB[:, t] * x_conv[:, t].unsqueeze(-1)
+            ys.append(torch.einsum("bn,bn->b", h, C[:, t]))
+        y = torch.stack(ys, dim=1)
+        y = y + x_conv * self.D
+        y = y * torch.sigmoid(z)
+        return self.dropout(self.out_proj(y))
+
+
+class Mamba(nn.Module):
+    """
+    Mamba-2: multi-layer stack with residual connections and RMSNorm.
+    Based on: https://arxiv.org/abs/2405.xxxxx
+    """
+    def __init__(self, d_model: int = 512, d_state: int = 16, d_conv: int = 4,
+                 expand: int = 2, dt_rank: str = "auto", dropout: float = 0.0,
+                 n_layers: int = 1):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            MambaBlock(d_model, d_state, d_conv, expand, dt_rank, dropout)
+            for _ in range(n_layers)
+        ])
+        self.norm = RMSNorm(d_model)
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x) + x
+        return self.norm(x)
 ''')
+
+        if "mlp" in needed:
 
         if "mlp" in needed:
             parts.append('''

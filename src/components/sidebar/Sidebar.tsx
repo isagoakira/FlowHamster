@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useGraphStore } from '../../hooks/useGraphStore'
-import { TEMPLATES, Template } from '../../utils/templateRegistry'
+import { Template, useTemplateStore } from '../../utils/templateRegistry'
 import { NODE_REGISTRY } from '../../utils/nodeRegistry'
 import { getCustomClassesAsNodeCategory } from '../../utils/customCompositeRegistry'
 import { NodeType } from '../../types/graph'
@@ -108,6 +108,11 @@ export default function Sidebar() {
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const features = useGraphStore((s) => s.features)
+
+  // Load templates from backend API on mount
+  const templates = useTemplateStore((s) => s.templates)
+  const templatesLoading = useTemplateStore((s) => s.isLoading)
+  useEffect(() => { useTemplateStore.getState().loadTemplates() }, [])
 
   // Get visible categories
   const visibleCategories = NODE_REGISTRY.filter(
@@ -316,7 +321,10 @@ export default function Sidebar() {
           </>
         ) : (
           <>
-            {TEMPLATES.map((tpl) => (
+            {templatesLoading ? (
+              <div style={{ color: '#666', fontSize: '12px', padding: '8px' }}>Loading templates...</div>
+            ) : (
+              templates.map((tpl) => (
               <div
                 key={tpl.id}
                 style={{

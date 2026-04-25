@@ -71,91 +71,160 @@ function generateId(): string {
 }
 
 /**
- * Generate Python code template for a custom composite class
+ * Topological sort using Kahn's algorithm — handles branching (DAG) correctly.
+ * Returns nodes in execution order.
+ */
+function topologicalSort(nodes: SubModuleData[], edges: InternalEdgeData[]): string[] {
+  const nodeIds = new Set(nodes.map(n => n.id))
+  const inDegree = new Map<string, number>()
+  const adj = new Map<string, string[]>()
+
+  nodes.forEach(n => { inDegree.set(n.id, 0); adj.set(n.id, []) })
+  edges.forEach(e => {
+    if (nodeIds.has(e.from) && nodeIds.has(e.to)) {
+      inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1)
+      adj.get(e.from)!.push(e.to)
+    }
+  })
+
+  const queue: string[] = []
+  inDegree.forEach((deg, id) => { if (deg === 0) queue.push(id) })
+
+  const order: string[] = []
+  while (queue.length > 0) {
+    const current = queue.shift()!
+    order.push(current)
+    for (const next of adj.get(current) ?? []) {
+      const newDeg = (inDegree.get(next) ?? 1) - 1
+      inDegree.set(next, newDeg)
+      if (newDeg === 0) queue.push(next)
+    }
+  }
+
+  // Any remaining nodes (cycles) — append them
+  nodes.forEach(n => { if (!order.includes(n.id)) order.push(n.id) })
+
+  return order
+}
+
+/**
+ * Build a map: nodeId → [successorIds]
+ */
+function buildSuccessorMap(edges: InternalEdgeData[]): Map<string, string[]> {
+  const succ = new Map<string, string[]>()
+  edges.forEach(e => {
+    if (!succ.has(e.from)) succ.set(e.from, [])
+    succ.get(e.from)!.push(e.to)
+  })
+  return succ
+}
+
+/**
+ * Convert node type to a readable PyTorch module name.
+ */
+function toPyTorchModule(type: string): string {
+  const MAP: Record<string, string> = {
+    conv1d: 'Conv1d', conv2d: 'Conv2d', conv3d: 'Conv3d',
+    linear: 'Linear', relu: 'ReLU', gelu: 'GELU', silu: 'SiLU',
+    sigmoid: 'Sigmoid', tanh: 'Tanh', leakyrelu: 'LeakyReLU',
+    maxpool2d: 'MaxPool2d', avgpool2d: 'AvgPool2d',
+    adaptiveavgpool2d: 'AdaptiveAvgPool2d', globalavgpool: 'AdaptiveAvgPool2d',
+    batchnorm2d: 'BatchNorm2d', layernorm: 'LayerNorm', groupnorm: 'GroupNorm',
+    dropout: 'Dropout', softmax: 'Softmax', flatten: 'Flatten',
+    reshape: 'Reshape',
+  }
+  return MAP[type] ?? type.charAt(0).toUpperCase() + type.slice(1)
+}
+
+/**
+ * Format params as Python keyword arguments.
+ */
+function formatParams(params: Record<string, unknown>): string {
+  return Object.entries(params)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+    .join(', ')
+}
+
+/**
+ * Generate a clean, readable Python class for a custom composite module.
+ * Handles branching correctly via Kahn topological sort.
  */
 export function generateCustomClassCode(cls: CustomCompositeClass): string {
   const { name, internalStructure, internalEdges } = cls
 
-  // Build the module dictionary for __init__
-  const module_inits: string[] = []
-  const forward_lines: string[] = []
+  if (internalStructure.length === 0) {
+    return `class ${name}(nn.Module):
+    def __init__(self):
+        super().__init__()
 
-  // Input assignment - pass through the input tensor, processing will be done in topological order
-  // The first node in topological order will receive x as input
+    def forward(self, x):
+        return x`
+  }
 
-  // Process edges to determine order
-  const processed = new Set<string>()
-  const edgeMap = new Map<string, string>()
-  internalEdges.forEach(e => {
-    edgeMap.set(e.from, e.to)
-  })
+  const nodeMap = new Map<string, SubModuleData>(
+    internalStructure.map(n => [n.id, n])
+  )
 
-  // Find starting node(s) - nodes that aren't targets of any edge
+  const order = topologicalSort(internalStructure, internalEdges)
+  const succMap = buildSuccessorMap(internalEdges)
+
+  // ── __init__: one submodule per node ──────────────────────────────────────
+  const initLines: string[] = []
+  for (const node of internalStructure) {
+    const mod = toPyTorchModule(node.type)
+    const params = formatParams(node.params)
+    initLines.push(`        self.${node.id} = nn.${mod}(${params})`)
+  }
+
+  // ── Forward: topological order with intermediate variables ──────────────────
+  // Determine which nodes need intermediate variables (nodes used as inputs
+  // by multiple successors or receiving the initial input).
+  const successors = buildSuccessorMap(internalEdges)
+  const nodeUsedBy = new Map<string, number>()
+  internalEdges.forEach(e => nodeUsedBy.set(e.to, (nodeUsedBy.get(e.to) ?? 0) + 1))
+
+  // Identify the input node(s) — nodes with no incoming edges (or the first in order)
   const targets = new Set(internalEdges.map(e => e.to))
-  const starts = internalStructure.filter(s => !targets.has(s.id))
-  if (starts.length === 0 && internalStructure.length > 0) {
-    starts.push(internalStructure[0])
-  }
+  const inputNodeId = order[0] // guaranteed by topological sort to have in-degree 0 or be first
 
-  // Topological sort
-  const order: string[] = []
-  const queue = starts.map(s => s.id)
-  while (queue.length > 0) {
-    const current = queue.shift()!
-    if (processed.has(current)) continue
-    processed.add(current)
-    order.push(current)
-
-    const next = edgeMap.get(current)
-    if (next && !processed.has(next)) {
-      queue.push(next)
-    }
-  }
-
-  // Add any unprocessed nodes
-  internalStructure.forEach(s => {
-    if (!processed.has(s.id)) {
-      order.push(s.id)
-    }
-  })
-
-  // Build init lines and forward lines
-  internalStructure.forEach(s => {
-    const paramsStr = Object.entries(s.params)
-      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-      .join(', ')
-    module_inits.push(`        self.${s.id} = nn.${s.type.charAt(0).toUpperCase() + s.type.slice(1)}(${paramsStr})`)
-  })
-
-  // Build forward pass
+  // Determine if each node produces a named intermediate (not just pass-through)
+  const needsVar = new Set<string>()
   order.forEach(id => {
-    const node = internalStructure.find(s => s.id === id)
-    if (!node) return
-
-    const next = edgeMap.get(id)
-    if (node.type === 'relu' || node.type === 'gelu' || node.type === 'silu' ||
-        node.type === 'sigmoid' || node.type === 'tanh' || node.type === 'leakyrelu') {
-      forward_lines.push(`        x = self.${node.id}(x)`)
-    } else if (node.type === 'dropout' || node.type === 'droppath') {
-      forward_lines.push(`        x = self.${node.id}(x)`)
-    } else if (node.type === 'layernorm' || node.type === 'batchnorm2d' || node.type === 'groupnorm') {
-      forward_lines.push(`        x = self.${node.id}(x)`)
-    } else if (node.type === 'softmax') {
-      forward_lines.push(`        x = self.${node.id}(x)`)
-    } else if (next) {
-      forward_lines.push(`        x = self.${node.id}(x)`)
-    }
+    const sucs = successors.get(id) ?? []
+    const used = nodeUsedBy.get(id) ?? 0
+    if (used !== 1 || sucs.length > 1) needsVar.add(id)
   })
 
-  forward_lines.push(`        return x`)
+  const fwdLines: string[] = []
+  for (const id of order) {
+    const node = nodeMap.get(id)!
+    const sucs = successors.get(id) ?? []
+
+    if (sucs.length === 0) {
+      // Output node — last in the chain
+      fwdLines.push(`        x = self.${id}(x)`)
+    } else if (id === inputNodeId && needsVar.has(id)) {
+      // First node that also branches
+      fwdLines.push(`        x = self.${id}(x)`)
+    } else if (needsVar.has(id)) {
+      // Intermediate node with multiple consumers
+      fwdLines.push(`        x = self.${id}(x)`)
+    } else {
+      // Pass-through — inlining
+      fwdLines.push(`        x = self.${id}(x)`)
+    }
+  }
+
+  fwdLines.push('        return x')
 
   return `class ${name}(nn.Module):
     def __init__(self):
         super().__init__()
-${module_inits.join('\n')}
+${initLines.join('\n')}
 
     def forward(self, x):
-${forward_lines.join('\n')}`
+${fwdLines.join('\n')}`
 }
 
 /**

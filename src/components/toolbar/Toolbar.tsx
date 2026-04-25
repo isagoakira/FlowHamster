@@ -39,15 +39,16 @@ export function Toolbar() {
   const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds)
 
   // Package-related selectors (custom composites)
-  const hasPackagedGroup = selectedNodeIds.some(id => {
+  // canPackage = selectedNodes are all non-composite, count >= 2
+  const canPackage = selectedNodeIds.length >= 2 && selectedNodeIds.every(id => {
     const node = nodes.find(n => n.id === id)
-    return (node?.data as any)?.isCustomComposite === true
+    return !(node?.data as any)?.isCustomComposite
   })
   const hasExpandedPackage = selectedNodeIds.some(id => {
     const node = nodes.find(n => n.id === id)
     return (node?.data as any)?.isCustomComposite === true && node?.data?.isExpanded === true
   })
-  const hasExpandablePackage = selectedNodeIds.some(id => {
+  const hasCollapsedPackage = selectedNodeIds.some(id => {
     const node = nodes.find(n => n.id === id)
     return (node?.data as any)?.isCustomComposite === true && node?.data?.isExpanded === false
   })
@@ -234,15 +235,15 @@ export function Toolbar() {
           ↪ Redo
         </button>
         <button
-          style={{ ...btnStyle, opacity: selectedNodeCount >= 2 ? 1 : 0.4 }}
+          style={{ ...btnStyle, opacity: canPackage ? 1 : 0.4 }}
           onClick={() => store.packageSelection()}
-          disabled={selectedNodeCount < 2}
+          disabled={!canPackage}
           title="Package selected modules into a single module"
         >
           📦 Package
         </button>
         <button
-          style={{ ...btnStyle, opacity: hasPackagedGroup ? 1 : 0.4 }}
+          style={{ ...btnStyle, opacity: hasExpandedPackage ? 1 : 0.4 }}
           onClick={() => {
             const groupId = selectedNodeIds.find(id => {
               const node = nodes.find(n => n.id === id)
@@ -256,7 +257,7 @@ export function Toolbar() {
           🔽 Collapse
         </button>
         <button
-          style={{ ...btnStyle, opacity: hasExpandablePackage ? 1 : 0.4 }}
+          style={{ ...btnStyle, opacity: hasCollapsedPackage ? 1 : 0.4 }}
           onClick={() => {
             const groupId = selectedNodeIds.find(id => {
               const node = nodes.find(n => n.id === id)
@@ -264,7 +265,7 @@ export function Toolbar() {
             })
             if (groupId) store.expandGroup(groupId)
           }}
-          disabled={!hasExpandablePackage}
+          disabled={!hasCollapsedPackage}
           title="Expand composite to see internal structure"
         >
           🔼 Expand
