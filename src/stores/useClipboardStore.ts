@@ -154,6 +154,14 @@ export const useClipboardStore = create<ClipboardStore>((set, get) => ({
           internalEdgeIds: Array.isArray(node.data.internalEdgeIds)
             ? node.data.internalEdgeIds.map((edgeId) => edgeIdMap.get(edgeId) ?? edgeId)
             : node.data.internalEdgeIds,
+          boundaryEdges: Array.isArray(node.data.boundaryEdges)
+            ? node.data.boundaryEdges.map((edge: any) => ({
+                ...edge,
+                originalEdgeId: edgeIdMap.get(edge.originalEdgeId) ?? edge.originalEdgeId,
+                source: nodeIdMap.get(edge.source) ?? edge.source,
+                target: nodeIdMap.get(edge.target) ?? edge.target,
+              }))
+            : node.data.boundaryEdges,
         },
       }
       return translatedNode

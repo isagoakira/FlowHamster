@@ -10,7 +10,9 @@ import {
   getCustomClass,
   getAllCustomClasses,
   getCustomClassesByCategory,
+  generateCustomClassCode,
   loadCustomClasses,
+  getCustomClassesAsNodeCategory,
 } from './customCompositeRegistry'
 import { SubModule, InternalEdge } from './nodeRegistry'
 
@@ -270,6 +272,27 @@ describe('customCompositeRegistry', () => {
     })
   })
 
+  describe('getCustomClassesAsNodeCategory()', () => {
+    it('should expose registered classes as draggable custom node definitions keyed by class id', () => {
+      const internalStructure = [createSubModule('relu1', 'relu', 'ReLU1')]
+      const registered = registerCustomClass('ReusableBlock', 'custom', 'other', '📦', 'Reusable', internalStructure, [], 'relu1')
+
+      const category = getCustomClassesAsNodeCategory()
+
+      expect(category.label).toBe('Custom')
+      expect(category.nodes).toHaveLength(1)
+      expect(category.nodes[0]).toMatchObject({
+        id: registered.id,
+        type: 'custom',
+        classId: registered.id,
+        customClassId: 'ReusableBlock',
+        originClassId: registered.id,
+        label: 'ReusableBlock',
+        displayLabel: '📦 ReusableBlock',
+      })
+    })
+  })
+
   describe('localStorage persistence', () => {
     it('should persist classes to localStorage', () => {
       const internalStructure = [createSubModule('relu1', 'relu', 'ReLU1')]
@@ -373,10 +396,34 @@ describe('customCompositeRegistry', () => {
       const code = registered.codeTemplate
 
       // Should process nodes in topological order
-      expect(code).toContain('self.input')
+      expect(code).toContain('x_input = x')
       expect(code).toContain('self.relu1')
       expect(code).toContain('self.relu2')
       expect(code).toContain('self.output')
+    })
+
+    it('should emit nested custom composites as class instances', () => {
+      const code = generateCustomClassCode({
+        id: 'custom_outer',
+        name: 'OuterModule',
+        baseType: 'custom',
+        category: 'other',
+        emoji: '📦',
+        description: 'Nested custom module',
+        internalStructure: [
+          { id: 'inner', type: 'custom', label: 'Inner', params: {}, customClassId: 'InnerModule' },
+          { id: 'relu', type: 'relu', label: 'ReLU', params: {} },
+        ],
+        internalEdges: [{ from: 'inner', to: 'relu' }],
+        outputVar: 'relu',
+        codeTemplate: '',
+        createdAt: 1,
+      })
+
+      expect(code).toContain('self.inner = InnerModule()')
+      expect(code).toContain('x_inner = self.inner(x)')
+      expect(code).toContain('x_relu = self.relu(x_inner)')
+      expect(code).toContain('return x_relu')
     })
   })
 })

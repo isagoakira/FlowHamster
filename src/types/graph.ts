@@ -128,6 +128,8 @@ export interface PredefinedCompositeNodeData extends CompositeNodeBase {
 export interface CustomCompositeNodeData extends CompositeNodeBase {
   isCustomComposite: true
   customClassId: string
+  customClassRegistryId?: string
+  originClassId?: string
   // 外部接口（自动推断）
   inputs: GroupPort[]
   outputs: GroupPort[]
@@ -144,6 +146,7 @@ export interface BoundaryEdge {
   direction: 'input' | 'output'
   internalNodeId: string
   internalHandle: string
+  groupHandleId?: string
   source: string
   target: string
   sourceHandle?: string | null
@@ -166,9 +169,11 @@ export interface SubModuleData {
   params: Record<string, number | string | boolean>
   position?: { x: number; y: number }  // 原始位置，解包时恢复
   customClassId?: string  // For custom composite nodes inside another package
+  data?: NodeData
 }
 
 export interface InternalEdgeData {
+  id?: string
   from: string
   to: string
   fromHandle?: string

@@ -1,8 +1,15 @@
 """
 FlowHamster Backend — FastAPI Entry Point
 """
+import sys
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+if __package__ in (None, ""):
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 from backend.routers import generate, execute, export, websocket, templates, workflows
 
 app = FastAPI(title="FlowHamster API", version="0.1.0")

@@ -27,6 +27,8 @@ import {
   genLossInit,
   genLossForward,
   genEvaluationCode,
+  genReusableCompositeClasses,
+  shouldEmitCompositeAsClass,
 } from './codeEmitter'
 
 // Re-export for backwards compatibility
@@ -534,7 +536,12 @@ export function generateLocalCode(
 
   for (const block of modelBlocks) {
     const compositeDef = getCompositeNodeDef(block.opType)
-    if (compositeDef && compositeDef.internalStructure && compositeDef.internalStructure.length > 0) {
+    if (
+      compositeDef &&
+      compositeDef.internalStructure &&
+      compositeDef.internalStructure.length > 0 &&
+      !shouldEmitCompositeAsClass(block.opType)
+    ) {
       // Composite node: generate expanded init and forward
       const compositeInits = genCompositeInit(block)
       initLines.push(...compositeInits)
@@ -677,6 +684,7 @@ ${workflowRuntimePrelude}
   const workflowSupportBlock = dataWorkflow.hasWorkflowRuntime
     ? `\n\n${dataWorkflow.pythonScaffold}\n`
     : '\n'
+  const reusableClassesBlock = genReusableCompositeClasses(modelBlocks).join('\n\n')
 
   // Collect custom composite class definitions
   const customClasses = getAllCustomClasses()
@@ -719,7 +727,7 @@ ${workflowRuntimePrelude}
   for (const cls of customClasses) {
     // 检查 cls.id（原始注册ID）、cls.name（模块名）、custom_${cls.name}（前缀形式）
     if (customClassIdsUsed.has(cls.id) || customClassIdsUsed.has(cls.name) || customClassIdsUsed.has(`custom_${cls.name}`)) {
-      customClassesBlock += `\n\n${cls.codeTemplate}`
+      customClassesBlock += `\n\n${generateCustomClassCode(cls)}`
     }
   }
 
@@ -729,6 +737,7 @@ ${workflowRuntimePrelude}
     `# DO NOT EDIT -- Regenerated from graph editor`,
     warningBlock,
     moduleImports,
+    reusableClassesBlock,
     customClassesBlock,
     `class FlowHamsterModel(nn.Module):`,
     `    def __init__(self):`,
@@ -737,7 +746,6 @@ ${workflowRuntimePrelude}
     ``,
     `    def forward(self, x):`,
     forwardBlock,
-    `}`,
     workflowSupportBlock,
     mainBlock,
   ].join('\n')
@@ -749,6 +757,6 @@ ${workflowRuntimePrelude}
 }
 
 // Import these at the bottom to avoid circular dependencies
-import { getAllCustomClasses } from './customCompositeRegistry'
+import { generateCustomClassCode, getAllCustomClasses } from './customCompositeRegistry'
 import { getCompositeNodeDef } from './nodeRegistry'
 import { WorkflowBinding } from '../schema/workflowDocument'

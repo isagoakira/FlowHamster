@@ -5,11 +5,14 @@
  */
 
 import { SubModule, InternalEdge } from './nodeRegistry'
-import { SubModuleData, InternalEdgeData } from '../types/graph'
+import { SubModuleData, InternalEdgeData, GroupPort, BoundaryEdge } from '../types/graph'
+import { genPythonNodeForward, genPythonNodeInit, safePythonName } from './pythonNodeRegistry'
 
 export interface CustomCompositeClass {
   id: string
   name: string
+  originClassId?: string
+  parentClassId?: string
   baseType: string  // 'mlp' | 'ffn' | 'transformerencoder' | etc.
   category: 'cv' | 'nlp' | 'gan' | 'other'
   emoji: string
@@ -17,25 +20,49 @@ export interface CustomCompositeClass {
   internalStructure: SubModuleData[]
   internalEdges: InternalEdgeData[]
   outputVar: string
+  inputs?: GroupPort[]
+  outputs?: GroupPort[]
+  boundaryEdges?: BoundaryEdge[]
   codeTemplate: string
   createdAt: number
 }
 
 const STORAGE_KEY = 'flowhamster_custom_composites'
+export const CUSTOM_CLASSES_CHANGED_EVENT = 'flowhamster:custom-classes-changed'
+
+type RegistrableSubModule = SubModule | SubModuleData
+type RegistrableInternalEdge = InternalEdge | InternalEdgeData
+
+function readFromHandle(edge: RegistrableInternalEdge): string | undefined {
+  return 'fromHandle' in edge ? edge.fromHandle : (edge as InternalEdge).fromPort
+}
+
+function readToHandle(edge: RegistrableInternalEdge): string | undefined {
+  return 'toHandle' in edge ? edge.toHandle : (edge as InternalEdge).toPort
+}
 
 // Convert SubModule[] to SubModuleData[]
-function toSubModuleData(structure: SubModule[]): SubModuleData[] {
+function toSubModuleData(structure: RegistrableSubModule[]): SubModuleData[] {
   return structure.map(s => ({
     id: s.id,
     type: s.type,
     label: s.label,
     params: { ...s.params },
+    position: 'position' in s ? s.position : undefined,
+    customClassId: 'customClassId' in s ? s.customClassId : undefined,
+    data: 'data' in s ? s.data : undefined,
   }))
 }
 
 // Convert InternalEdge[] to InternalEdgeData[]
-function toInternalEdgeData(edges: InternalEdge[]): InternalEdgeData[] {
-  return edges.map(e => ({ from: e.from, to: e.to }))
+function toInternalEdgeData(edges: RegistrableInternalEdge[]): InternalEdgeData[] {
+  return edges.map(e => ({
+    id: 'id' in e ? e.id : undefined,
+    from: e.from,
+    to: e.to,
+    fromHandle: readFromHandle(e),
+    toHandle: readToHandle(e),
+  }))
 }
 
 /**
@@ -43,6 +70,7 @@ function toInternalEdgeData(edges: InternalEdge[]): InternalEdgeData[] {
  */
 export function loadCustomClasses(): CustomCompositeClass[] {
   try {
+    if (typeof localStorage === 'undefined') return []
     const stored = localStorage.getItem(STORAGE_KEY)
     if (!stored) return []
     return JSON.parse(stored)
@@ -58,6 +86,9 @@ export function loadCustomClasses(): CustomCompositeClass[] {
 function saveCustomClasses(classes: CustomCompositeClass[]): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(classes))
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(CUSTOM_CLASSES_CHANGED_EVENT))
+    }
   } catch {
     console.error('Failed to save custom classes to localStorage')
   }
@@ -108,53 +139,15 @@ function topologicalSort(nodes: SubModuleData[], edges: InternalEdgeData[]): str
 }
 
 /**
- * Build a map: nodeId → [successorIds]
- */
-function buildSuccessorMap(edges: InternalEdgeData[]): Map<string, string[]> {
-  const succ = new Map<string, string[]>()
-  edges.forEach(e => {
-    if (!succ.has(e.from)) succ.set(e.from, [])
-    succ.get(e.from)!.push(e.to)
-  })
-  return succ
-}
-
-/**
- * Convert node type to a readable PyTorch module name.
- */
-function toPyTorchModule(type: string): string {
-  const MAP: Record<string, string> = {
-    conv1d: 'Conv1d', conv2d: 'Conv2d', conv3d: 'Conv3d',
-    linear: 'Linear', relu: 'ReLU', gelu: 'GELU', silu: 'SiLU',
-    sigmoid: 'Sigmoid', tanh: 'Tanh', leakyrelu: 'LeakyReLU',
-    maxpool2d: 'MaxPool2d', avgpool2d: 'AvgPool2d',
-    adaptiveavgpool2d: 'AdaptiveAvgPool2d', globalavgpool: 'AdaptiveAvgPool2d',
-    batchnorm2d: 'BatchNorm2d', layernorm: 'LayerNorm', groupnorm: 'GroupNorm',
-    dropout: 'Dropout', softmax: 'Softmax', flatten: 'Flatten',
-    reshape: 'Reshape',
-  }
-  return MAP[type] ?? type.charAt(0).toUpperCase() + type.slice(1)
-}
-
-/**
- * Format params as Python keyword arguments.
- */
-function formatParams(params: Record<string, unknown>): string {
-  return Object.entries(params)
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-    .join(', ')
-}
-
-/**
  * Generate a clean, readable Python class for a custom composite module.
  * Handles branching correctly via Kahn topological sort.
  */
 export function generateCustomClassCode(cls: CustomCompositeClass): string {
-  const { name, internalStructure, internalEdges } = cls
+  const { name, internalStructure, internalEdges, outputVar } = cls
+  const className = safePythonName(name)
 
   if (internalStructure.length === 0) {
-    return `class ${name}(nn.Module):
+    return `class ${className}(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -162,66 +155,50 @@ export function generateCustomClassCode(cls: CustomCompositeClass): string {
         return x`
   }
 
-  const nodeMap = new Map<string, SubModuleData>(
-    internalStructure.map(n => [n.id, n])
-  )
-
   const order = topologicalSort(internalStructure, internalEdges)
-  const succMap = buildSuccessorMap(internalEdges)
+  const nodeMap = new Map(internalStructure.map((node) => [node.id, node]))
+  const incoming = new Map<string, InternalEdgeData[]>()
+  for (const edge of internalEdges) {
+    if (!incoming.has(edge.to)) incoming.set(edge.to, [])
+    incoming.get(edge.to)!.push(edge)
+  }
 
-  // ── __init__: one submodule per node ──────────────────────────────────────
   const initLines: string[] = []
   for (const node of internalStructure) {
-    const mod = toPyTorchModule(node.type)
-    const params = formatParams(node.params)
-    initLines.push(`        self.${node.id} = nn.${mod}(${params})`)
+    const instanceName = safePythonName(node.id)
+    const initLine = genPythonNodeInit({
+      instanceName,
+      opType: node.customClassId ? 'custom' : node.type,
+      fields: node.params,
+      customClassName: node.customClassId,
+    })
+    if (initLine) initLines.push(`        ${initLine}`)
   }
-
-  // ── Forward: topological order with intermediate variables ──────────────────
-  // Determine which nodes need intermediate variables (nodes used as inputs
-  // by multiple successors or receiving the initial input).
-  const successors = buildSuccessorMap(internalEdges)
-  const nodeUsedBy = new Map<string, number>()
-  internalEdges.forEach(e => nodeUsedBy.set(e.to, (nodeUsedBy.get(e.to) ?? 0) + 1))
-
-  // Identify the input node(s) — nodes with no incoming edges (or the first in order)
-  const targets = new Set(internalEdges.map(e => e.to))
-  const inputNodeId = order[0] // guaranteed by topological sort to have in-degree 0 or be first
-
-  // Determine if each node produces a named intermediate (not just pass-through)
-  const needsVar = new Set<string>()
-  order.forEach(id => {
-    const sucs = successors.get(id) ?? []
-    const used = nodeUsedBy.get(id) ?? 0
-    if (used !== 1 || sucs.length > 1) needsVar.add(id)
-  })
 
   const fwdLines: string[] = []
+  const varMap = new Map<string, string>()
   for (const id of order) {
-    const node = nodeMap.get(id)!
-    const sucs = successors.get(id) ?? []
+    const node = nodeMap.get(id)
+    if (!node) continue
 
-    if (sucs.length === 0) {
-      // Output node — last in the chain
-      fwdLines.push(`        x = self.${id}(x)`)
-    } else if (id === inputNodeId && needsVar.has(id)) {
-      // First node that also branches
-      fwdLines.push(`        x = self.${id}(x)`)
-    } else if (needsVar.has(id)) {
-      // Intermediate node with multiple consumers
-      fwdLines.push(`        x = self.${id}(x)`)
-    } else {
-      // Pass-through — inlining
-      fwdLines.push(`        x = self.${id}(x)`)
-    }
+    const instanceName = safePythonName(node.id)
+    const outVar = `x_${instanceName}`
+    const inputVars = (incoming.get(id) ?? [])
+      .map((edge) => varMap.get(edge.from))
+      .filter((value): value is string => Boolean(value))
+    const opType = node.customClassId ? 'custom' : node.type
+    const line = genPythonNodeForward(opType, outVar, instanceName, inputVars.length > 0 ? inputVars : ['x'], node.params)
+    if (line) fwdLines.push(`        ${line}`)
+    varMap.set(id, outVar)
   }
 
-  fwdLines.push('        return x')
+  const finalVar = varMap.get(outputVar) ?? (order.length > 0 ? varMap.get(order[order.length - 1]) : null) ?? 'x'
+  fwdLines.push(`        return ${finalVar}`)
 
-  return `class ${name}(nn.Module):
+  return `class ${className}(nn.Module):
     def __init__(self):
         super().__init__()
-${initLines.join('\n')}
+${initLines.length > 0 ? initLines.join('\n') : '        pass'}
 
     def forward(self, x):
 ${fwdLines.join('\n')}`
@@ -237,9 +214,16 @@ export function registerCustomClass(
   category: 'cv' | 'nlp' | 'gan' | 'other',
   emoji: string,
   description: string,
-  internalStructure: SubModule[],
-  internalEdges: InternalEdge[],
-  outputVar: string
+  internalStructure: RegistrableSubModule[],
+  internalEdges: RegistrableInternalEdge[],
+  outputVar: string,
+  options: {
+    inputs?: GroupPort[]
+    outputs?: GroupPort[]
+    boundaryEdges?: BoundaryEdge[]
+    originClassId?: string
+    parentClassId?: string
+  } = {}
 ): CustomCompositeClass {
   const classes = loadCustomClasses()
 
@@ -249,9 +233,12 @@ export function registerCustomClass(
     return existing
   }
 
+  const id = generateId()
   const newClass: CustomCompositeClass = {
-    id: generateId(),
+    id,
     name,
+    originClassId: options.originClassId ?? id,
+    parentClassId: options.parentClassId,
     baseType,
     category,
     emoji,
@@ -259,6 +246,9 @@ export function registerCustomClass(
     internalStructure: toSubModuleData(internalStructure),
     internalEdges: toInternalEdgeData(internalEdges),
     outputVar,
+    inputs: options.inputs ?? [],
+    outputs: options.outputs ?? [],
+    boundaryEdges: options.boundaryEdges ?? [],
     codeTemplate: '',
     createdAt: Date.now(),
   }
@@ -358,8 +348,13 @@ export function getCustomClassesAsNodeCategory(): { label: string; nodes: any[] 
     categories.push({
       label: 'Custom / Computer Vision',
       nodes: categoryMap.cv.map(cls => ({
-        type: cls.id,
-        label: `${cls.emoji} ${cls.name}`,
+        id: cls.id,
+        type: 'custom',
+        classId: cls.id,
+        customClassId: cls.name,
+        originClassId: cls.originClassId ?? cls.id,
+        label: cls.name,
+        displayLabel: `${cls.emoji} ${cls.name}`,
         description: cls.description || `Custom ${cls.baseType} module`,
         defaultParams: {},
         outputType: 'Tensor',
@@ -371,8 +366,13 @@ export function getCustomClassesAsNodeCategory(): { label: string; nodes: any[] 
     categories.push({
       label: 'Custom / NLP',
       nodes: categoryMap.nlp.map(cls => ({
-        type: cls.id,
-        label: `${cls.emoji} ${cls.name}`,
+        id: cls.id,
+        type: 'custom',
+        classId: cls.id,
+        customClassId: cls.name,
+        originClassId: cls.originClassId ?? cls.id,
+        label: cls.name,
+        displayLabel: `${cls.emoji} ${cls.name}`,
         description: cls.description || `Custom ${cls.baseType} module`,
         defaultParams: {},
         outputType: 'Tensor',
@@ -384,8 +384,13 @@ export function getCustomClassesAsNodeCategory(): { label: string; nodes: any[] 
     categories.push({
       label: 'Custom / GAN',
       nodes: categoryMap.gan.map(cls => ({
-        type: cls.id,
-        label: `${cls.emoji} ${cls.name}`,
+        id: cls.id,
+        type: 'custom',
+        classId: cls.id,
+        customClassId: cls.name,
+        originClassId: cls.originClassId ?? cls.id,
+        label: cls.name,
+        displayLabel: `${cls.emoji} ${cls.name}`,
         description: cls.description || `Custom ${cls.baseType} module`,
         defaultParams: {},
         outputType: 'Tensor',
@@ -397,8 +402,13 @@ export function getCustomClassesAsNodeCategory(): { label: string; nodes: any[] 
     categories.push({
       label: 'Custom / Other',
       nodes: categoryMap.other.map(cls => ({
-        type: cls.id,
-        label: `${cls.emoji} ${cls.name}`,
+        id: cls.id,
+        type: 'custom',
+        classId: cls.id,
+        customClassId: cls.name,
+        originClassId: cls.originClassId ?? cls.id,
+        label: cls.name,
+        displayLabel: `${cls.emoji} ${cls.name}`,
         description: cls.description || `Custom ${cls.baseType} module`,
         defaultParams: {},
         outputType: 'Tensor',

@@ -10,6 +10,7 @@ import { SubModule, getCompositeNodeDef } from './nodeRegistry'
 import { getAllCustomClasses } from './customCompositeRegistry'
 import { getSourceNodeId } from './astBuilder'
 import { safeEvaluate, resolveStringTemplate } from './safeEval'
+import { genPythonNodeInit } from './pythonNodeRegistry'
 
 // Feature toggles interface
 export interface FeatureToggles {
@@ -45,6 +46,19 @@ function resolveParams(params: Record<string, any>, defaults: Record<string, any
     resolved[key] = resolveTemplate(value, merged)
   }
   return resolved
+}
+
+function pyBool(value: unknown, fallback: boolean): string {
+  return value === undefined || value === null
+    ? (fallback ? 'True' : 'False')
+    : (value === true || value === 'true' ? 'True' : 'False')
+}
+
+function pyLiteral(value: unknown): string {
+  if (typeof value === 'boolean') return value ? 'True' : 'False'
+  if (typeof value === 'string') return JSON.stringify(value)
+  if (value === null || value === undefined) return 'None'
+  return String(value)
 }
 
 // ─────────────────────────────────────────────
@@ -137,6 +151,76 @@ function genSubModuleInit(subModule: SubModule, params: Record<string, any>, pre
 
 function supportsMultiLayer(opType: string): boolean {
   return ['transformerencoder', 'transformerdecoder'].includes(opType)
+}
+
+export function shouldEmitCompositeAsClass(opType: string): boolean {
+  return ['transformerencoder', 'transformerdecoder'].includes(opType)
+}
+
+export function genReusableCompositeClasses(blocks: NodeBlock[]): string[] {
+  const classDefs: string[] = []
+  const opTypes = new Set(blocks.map((block) => block.opType))
+
+  if (opTypes.has('transformerencoder')) {
+    classDefs.push(`class FlowHamsterTransformerEncoderBlock(nn.Module):
+    def __init__(self, embed_dim, num_heads, dim_feedforward=2048, dropout=0.1):
+        super().__init__()
+        self.self_attn = nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        self.norm1 = nn.LayerNorm(embed_dim)
+        self.norm2 = nn.LayerNorm(embed_dim)
+        self.dropout = nn.Dropout(dropout)
+        self.ffn = nn.Sequential(
+            nn.Linear(embed_dim, dim_feedforward),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(dim_feedforward, embed_dim),
+        )
+
+    def forward(self, x):
+        attn_out, _ = self.self_attn(x, x, x, need_weights=False)
+        x = self.norm1(x + self.dropout(attn_out))
+        ffn_out = self.ffn(x)
+        x = self.norm2(x + self.dropout(ffn_out))
+        return x
+
+
+class FlowHamsterTransformerEncoder(nn.Module):
+    def __init__(self, embed_dim, num_heads, num_layers=1, dim_feedforward=2048, dropout=0.1):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            FlowHamsterTransformerEncoderBlock(
+                embed_dim=embed_dim,
+                num_heads=num_heads,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+            )
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        return x`)
+  }
+
+  if (opTypes.has('transformerdecoder')) {
+    classDefs.push(`class FlowHamsterTransformerDecoder(nn.Module):
+    def __init__(self, embed_dim, num_heads, num_layers=1, dim_feedforward=2048, dropout=0.1):
+        super().__init__()
+        layer = nn.TransformerDecoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            batch_first=True,
+        )
+        self.decoder = nn.TransformerDecoder(layer, num_layers=num_layers)
+
+    def forward(self, tgt, memory):
+        return self.decoder(tgt, memory)`)
+  }
+
+  return classDefs
 }
 
 // ─────────────────────────────────────────────
@@ -505,16 +589,25 @@ export function genCompositeForward(block: NodeBlock): string | null {
 // ─────────────────────────────────────────────
 
 export function genInit(block: NodeBlock): string | null {
+  const registryInit = genPythonNodeInit({
+    instanceName: block.instanceName,
+    opType: block.opType,
+    fields: block.fields,
+  })
+  if (registryInit) {
+    return registryInit
+  }
+
   if (block.category !== 'module') return null
 
   const f = block.fields
   const name = block.instanceName
 
   switch (block.opType) {
-    case 'conv1d': return `self.${name} = nn.Conv1d(in_channels=${f.in_channels ?? 0}, out_channels=${f.out_channels ?? 0}, kernel_size=${f.kernel_size ?? 3}, stride=${f.stride ?? 1}, padding=${f.padding ?? 0}, bias=${f.bias ?? false})`
-    case 'conv2d': return `self.${name} = nn.Conv2d(in_channels=${f.in_channels ?? 0}, out_channels=${f.out_channels ?? 0}, kernel_size=${f.kernel_size ?? 3}, stride=${f.stride ?? 1}, padding=${f.padding ?? 0}, bias=${f.bias ?? false})`
-    case 'conv3d': return `self.${name} = nn.Conv3d(in_channels=${f.in_channels ?? 0}, out_channels=${f.out_channels ?? 0}, kernel_size=${f.kernel_size ?? 3}, stride=${f.stride ?? 1}, padding=${f.padding ?? 0}, bias=${f.bias ?? false})`
-    case 'linear': return `self.${name} = nn.Linear(in_features=${f.in_features ?? 0}, out_features=${f.out_features ?? 0}, bias=${f.bias ?? true})`
+    case 'conv1d': return `self.${name} = nn.Conv1d(in_channels=${f.in_channels ?? 0}, out_channels=${f.out_channels ?? 0}, kernel_size=${f.kernel_size ?? 3}, stride=${f.stride ?? 1}, padding=${f.padding ?? 0}, bias=${pyBool(f.bias, false)})`
+    case 'conv2d': return `self.${name} = nn.Conv2d(in_channels=${f.in_channels ?? 0}, out_channels=${f.out_channels ?? 0}, kernel_size=${f.kernel_size ?? 3}, stride=${f.stride ?? 1}, padding=${f.padding ?? 0}, bias=${pyBool(f.bias, false)})`
+    case 'conv3d': return `self.${name} = nn.Conv3d(in_channels=${f.in_channels ?? 0}, out_channels=${f.out_channels ?? 0}, kernel_size=${f.kernel_size ?? 3}, stride=${f.stride ?? 1}, padding=${f.padding ?? 0}, bias=${pyBool(f.bias, false)})`
+    case 'linear': return `self.${name} = nn.Linear(in_features=${f.in_features ?? 0}, out_features=${f.out_features ?? 0}, bias=${pyBool(f.bias, true)})`
     case 'relu': return `self.${name} = nn.ReLU()`
     case 'gelu': return `self.${name} = nn.GELU()`
     case 'silu': return `self.${name} = nn.SiLU()`
@@ -548,18 +641,15 @@ export function genInit(block: NodeBlock): string | null {
     case 'mlp': return `self.${name} = nn.Sequential(nn.Linear(${f.in_features ?? 784}, ${f.hidden_features ?? 256}), nn.ReLU(), nn.Linear(${f.hidden_features ?? 256}, ${f.out_features ?? 10}))`
     case 'transformerencoder':
     case 'transformerdecoder': {
-      const compositeDef = getCompositeNodeDef(block.opType)
-      if (compositeDef && compositeDef.internalStructure && compositeDef.internalStructure.length > 0) {
-        return null
-      }
       const d = f.embed_dim ?? f.d_model ?? 512
       const nh = f.num_heads ?? f.nhead ?? 8
       const dl = f.num_layers ?? 6
       const dimFf = f.dim_feedforward ?? 2048
+      const dropout = f.dropout ?? 0.1
       if (block.opType === 'transformerdecoder') {
-        return `self.${name} = nn.TransformerDecoder(nn.TransformerDecoderLayer(d_model=${d}, nhead=${nh}, dim_feedforward=${dimFf}, batch_first=True), num_layers=${dl})`
+        return `self.${name} = FlowHamsterTransformerDecoder(embed_dim=${d}, num_heads=${nh}, num_layers=${dl}, dim_feedforward=${dimFf}, dropout=${dropout})`
       }
-      return `self.${name} = nn.TransformerEncoder(nn.TransformerEncoderLayer(d_model=${d}, nhead=${nh}, dim_feedforward=${dimFf}, batch_first=True), num_layers=${dl})`
+      return `self.${name} = FlowHamsterTransformerEncoder(embed_dim=${d}, num_heads=${nh}, num_layers=${dl}, dim_feedforward=${dimFf}, dropout=${dropout})`
     }
     case 'mamba': {
       const compositeDef = getCompositeNodeDef(block.opType)
@@ -597,8 +687,8 @@ export function genInit(block: NodeBlock): string | null {
         )
         const className = customClass?.name ?? block.nodeId ?? 'CustomModule'
         const params = Object.entries(f)
-          .filter(([k]) => k !== 'nodeType' && k !== 'label')
-          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+          .filter(([k]) => !['nodeType', 'label', 'customClassId', 'internalStructure', 'internalEdges'].includes(k))
+          .map(([k, v]) => `${k}=${pyLiteral(v)}`)
           .join(', ')
         return `self.${name} = ${className}(${params})`
       }
@@ -679,6 +769,9 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
     if (opType === 'slice') {
       const up = resolveSrc(Object.values(inputs).find((v): v is string => typeof v === 'string' && v !== null) ?? null, allBlocks)
       const s = fields.start ?? 0, e = fields.end ?? -1, st = fields.step ?? 1
+      if (fields.dim !== undefined && st === 1 && Number(e) >= Number(s)) {
+        return `        ${outputVar} = ${up}.narrow(dim=${fields.dim}, start=${s}, length=${Number(e) - Number(s)})`
+      }
       return `        ${outputVar} = ${up}[${s}:${e}:${st}]`
     }
     if (opType === 'permute') {
@@ -705,8 +798,7 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
       return `        ${outputVar} = torch.zeros(${shape})`
     }
     if (opType === 'parameter') {
-      const shape = (fields.shape as string) || '1,1,768'
-      return `        ${outputVar} = nn.Parameter(torch.zeros(${shape}))`
+      return `        ${outputVar} = self.${block.instanceName}`
     }
     return null
   }

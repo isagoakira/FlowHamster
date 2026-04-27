@@ -22,7 +22,7 @@ export interface NodeBlock {
 }
 
 function safeId(id: string): string {
-  return id.replace(/-/g, '_').replace(/:/g, '_').replace(/\./g, '_')
+  return id.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1')
 }
 
 function getSourceRefs(input: string | string[] | null | undefined): string[] {
@@ -73,7 +73,7 @@ export function buildAST(
     const opType = normalizeNodeType(n.data.nodeType as string)
     const sig = getSignature(opType)
     const category = sig?.category ?? getNodeCategory(opType)
-    const fields = { ...n.data.params }
+    const fields: Record<string, any> = { ...n.data.params, label: n.data.label }
     // For custom composite nodes, include customClassId and internalStructure in fields
     if (n.data.nodeType === 'custom' && (n.data as any).customClassId) {
       fields.customClassId = (n.data as any).customClassId
@@ -112,6 +112,15 @@ export function buildAST(
       const existing = (tgt.inputs as Record<string, string | null>)[port]
 
       if (existing && existing !== ref) {
+        if (
+          (tgt.opType === 'add' || tgt.opType === 'mul') &&
+          port === 'a' &&
+          !(tgt.inputs as Record<string, string | null>).b
+        ) {
+          ;(tgt.inputs as Record<string, string | null>).b = ref
+          portEdgeCounts[`${edge.target}|b`] = 1
+          continue
+        }
         // Multiple edges to same port → create implicit concat node
         const icatId = `__icat_${edge.target}_${port}`
         if (!blockMap[icatId]) {

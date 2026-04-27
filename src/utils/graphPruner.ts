@@ -72,9 +72,13 @@ export function pruneGraph(
     }
   })
 
-  // Build forward adjacency list
-  const inputIds = new Set(
-    nodes.filter(n => normalizeNodeType(n.data.nodeType as string) === 'input').map(n => n.id)
+  // Build forward adjacency list. Inputs are not the only source nodes:
+  // graph-owned parameters/constants (e.g. ViT cls_token / pos_embed) are
+  // also roots that must survive pruning when an output depends on them.
+  const sourceIds = new Set(
+    nodes
+      .filter(n => ['input', 'parameter', 'constant'].includes(normalizeNodeType(n.data.nodeType as string)))
+      .map(n => n.id)
   )
   const forwardAdj: Record<string, string[]> = {}
   for (const n of nodes) forwardAdj[n.id] = []
@@ -84,7 +88,7 @@ export function pruneGraph(
 
   // Forward BFS from all Input nodes
   const reachableFromInput = new Set<string>()
-  let queue = [...inputIds]
+  let queue = [...sourceIds]
   while (queue.length > 0) {
     const nid = queue.shift()!
     if (reachableFromInput.has(nid)) continue
@@ -97,10 +101,10 @@ export function pruneGraph(
   // Intersection: nodes that are both reachable from inputs AND needed for outputs
   const validIds = new Set<string>()
   for (const id of Object.keys(branchAssignments)) {
-    if (reachableFromInput.has(id) || inputIds.has(id)) validIds.add(id)
+    if (reachableFromInput.has(id) || sourceIds.has(id)) validIds.add(id)
   }
-  // Always include input nodes
-  for (const id of inputIds) validIds.add(id)
+  // Always include source nodes
+  for (const id of sourceIds) validIds.add(id)
 
   const validNodes = nodes.filter(n => validIds.has(n.id))
   const validEdges = edges.filter(e => validIds.has(e.source) && validIds.has(e.target))

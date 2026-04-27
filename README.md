@@ -201,10 +201,16 @@ npm run dev
 
 **Start Backend:**
 ```bash
-cd backend
-uvicorn main:app --reload --port 8000
+npm run backend:dev
 # API at http://localhost:8000
 # Docs at http://localhost:8000/docs
+```
+
+This launcher only watches [`backend/`](/Users/Zhuanz1/Desktop/file/FlowHamster/workspace/flowhamster_demo/backend) for reloads, which avoids high CPU usage from scanning the whole repo (especially `node_modules`).
+
+**Production-style backend run (no file watching):**
+```bash
+npm run backend:start
 ```
 
 ### Build

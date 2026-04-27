@@ -9,6 +9,7 @@ import {
   expandPackage,
   collapsePackage,
   getNextModuleName,
+  getNextModuleNameForNodes,
   computeTopologicalLayout,
   resetModuleCounter,
 } from './subgraphPackager'
@@ -48,13 +49,19 @@ function createNode(id: string, type: string, label: string, position = { x: 0, 
 }
 
 // Helper to create an edge
-function createEdge(id: string, source: string, target: string): FlowHamsterEdge {
+function createEdge(
+  id: string,
+  source: string,
+  target: string,
+  sourceHandle: string | null = null,
+  targetHandle: string | null = null
+): FlowHamsterEdge {
   return {
     id,
     source,
     target,
-    sourceHandle: null,
-    targetHandle: null,
+    sourceHandle,
+    targetHandle,
   }
 }
 
@@ -164,6 +171,89 @@ describe('subgraphPackager', () => {
       // Check if the edge ID is preserved
       const restoredEdge = result.edges.find(e => e.source === 'node1' && e.target === 'node2')
       expect(restoredEdge).toBeDefined()
+      expect(restoredEdge?.id).toBe('original-edge-id')
+    })
+
+    it('should restore current boundary edges without reconnecting stale package history', () => {
+      const externalA = createNode('external-a', 'input', 'ExternalA', { x: 0, y: 0 })
+      const externalB = createNode('external-b', 'input', 'ExternalB', { x: 0, y: 120 })
+      const node1 = createNode('node1', 'relu', 'ReLU1', { x: 160, y: 60 })
+      const node2 = createNode('node2', 'linear', 'Linear1', { x: 320, y: 60 })
+      const output = createNode('output', 'output', 'Output', { x: 480, y: 60 })
+      const nodes: FlowHamsterNode[] = [externalA, externalB, node1, node2, output]
+      const edges: FlowHamsterEdge[] = [
+        createEdge('in-a', 'external-a', 'node1', 'out', 'x'),
+        createEdge('in-b', 'external-b', 'node1', 'out', 'x'),
+        createEdge('mid', 'node1', 'node2', 'y', 'x'),
+        createEdge('out', 'node2', 'output', 'y', 'x'),
+      ]
+
+      const pkgNode = packageNodes(nodes, edges, ['node1', 'node2'], { x: 240, y: 60 })
+
+      expect(pkgNode.data.inputs).toHaveLength(1)
+      expect(pkgNode.data.outputs).toHaveLength(1)
+      expect(pkgNode.data.boundaryEdges).toHaveLength(3)
+
+      const packagedEdges: FlowHamsterEdge[] = [
+        createEdge('in-a', 'external-a', pkgNode.id, 'out', 'input_0'),
+        createEdge('in-b', 'external-b', pkgNode.id, 'out', 'input_0'),
+        createEdge('out', pkgNode.id, 'output', 'output_0', 'x'),
+      ]
+      const result = unpackageGroup(pkgNode.id, [externalA, externalB, output, pkgNode as FlowHamsterNode], packagedEdges)
+
+      expect(result.nodes.some(n => n.id === pkgNode.id)).toBe(false)
+      expect(result.nodes.some(n => n.id === 'node1')).toBe(true)
+      expect(result.nodes.some(n => n.id === 'node2')).toBe(true)
+
+      expect(result.edges.find(e => e.id === 'in-a')).toMatchObject({
+        source: 'external-a',
+        target: 'node1',
+        sourceHandle: 'out',
+        targetHandle: 'x',
+      })
+      expect(result.edges.find(e => e.id === 'in-b')).toMatchObject({
+        source: 'external-b',
+        target: 'node1',
+        sourceHandle: 'out',
+        targetHandle: 'x',
+      })
+      expect(result.edges.find(e => e.id === 'mid')).toMatchObject({
+        source: 'node1',
+        target: 'node2',
+        sourceHandle: 'y',
+        targetHandle: 'x',
+      })
+      expect(result.edges.find(e => e.id === 'out')).toMatchObject({
+        source: 'node2',
+        target: 'output',
+        sourceHandle: 'y',
+        targetHandle: 'x',
+      })
+    })
+
+    it('should unpackage copied instances with unique restored node and edge IDs', () => {
+      const node1 = createNode('node1', 'relu', 'ReLU1', { x: 100, y: 100 })
+      const node2 = createNode('node2', 'linear', 'Linear1', { x: 200, y: 100 })
+      const originalEdge = createEdge('e1', 'node1', 'node2')
+      const pkgNode = packageNodes([node1, node2], [originalEdge], ['node1', 'node2'], { x: 150, y: 100 })
+      const copiedPkg = {
+        ...pkgNode,
+        id: 'copied-package',
+        position: { x: 300, y: 100 },
+        data: {
+          ...pkgNode.data,
+          label: 'copied-package',
+        },
+      } as FlowHamsterNode
+
+      const result = unpackageGroup('copied-package', [node1, node2, copiedPkg], [originalEdge])
+
+      expect(result.nodes.find(n => n.id === 'node1')).toBeDefined()
+      expect(result.nodes.find(n => n.id === 'node2')).toBeDefined()
+      expect(result.nodes.find(n => n.id === 'node1_1')).toBeDefined()
+      expect(result.nodes.find(n => n.id === 'node2_1')).toBeDefined()
+      expect(result.edges.find(e => e.id === 'e1')).toMatchObject({ source: 'node1', target: 'node2' })
+      expect(result.edges.find(e => e.id === 'e1_1')).toMatchObject({ source: 'node1_1', target: 'node2_1' })
     })
   })
 
@@ -235,13 +325,13 @@ describe('subgraphPackager', () => {
 
       // After first expand, edges should contain recreated internal edge
       expect(result1.edges.length).toBe(1)
-      expect(result1.edges[0].id).toBe('e_node1_node2')
+      expect(result1.edges[0].id).toBe('e1')
 
       // Second expand (re-expand without collapsing)
       const result2 = expandPackage(pkgNode, result1.nodes, result1.edges)
 
-      // Count edges with the recreated ID (not original 'e1')
-      const edgeCount = result2.edges.filter(e => e.id === 'e_node1_node2').length
+      // Count edges with the preserved original ID
+      const edgeCount = result2.edges.filter(e => e.id === 'e1').length
       expect(edgeCount).toBe(1) // Should only have one edge, not duplicated
     })
 
@@ -277,8 +367,22 @@ describe('subgraphPackager', () => {
       expect(internalNode2).toBeDefined()
 
       // Edge should be recreated (not duplicated)
-      const edgeCount = reexpanded.edges.filter(e => e.id === 'e_node1_node2').length
+      const edgeCount = reexpanded.edges.filter(e => e.id === 'e1').length
       expect(edgeCount).toBe(1)
+    })
+
+    it('should expand copied packages without deleting unrelated nodes with matching internal IDs', () => {
+      const existingNode = createNode('node1', 'relu', 'ExistingReLU', { x: 0, y: 0 })
+      const internalNode = createNode('node1', 'relu', 'InnerReLU', { x: 100, y: 100 })
+      const internalNode2 = createNode('node2', 'linear', 'InnerLinear', { x: 200, y: 100 })
+      const pkgNode = packageNodes([internalNode, internalNode2], [createEdge('e1', 'node1', 'node2')], ['node1', 'node2'], { x: 150, y: 100 })
+      const copiedPkg = { ...pkgNode, id: 'copied-package' } as FlowHamsterNode
+
+      const result = expandPackage(copiedPkg as any, [existingNode, copiedPkg], [])
+
+      expect(result.nodes.find(n => n.id === 'node1' && n.data.label === 'ExistingReLU')).toBeDefined()
+      expect(result.nodes.find(n => n.id === 'node1_1')).toBeDefined()
+      expect(result.edges.find(e => e.id === 'e1')).toMatchObject({ source: 'node1_1', target: 'node2' })
     })
   })
 
@@ -308,25 +412,48 @@ describe('subgraphPackager', () => {
   })
 
   describe('getNextModuleName()', () => {
-    it('should generate unique module names', () => {
+    it('should derive module names from the active graph instead of a persistent counter', () => {
       const name1 = getNextModuleName()
-      const name2 = getNextModuleName()
-      const name3 = getNextModuleName()
+      const nameAfterReset = getNextModuleName()
 
       expect(name1).toBe('Module_1')
-      expect(name2).toBe('Module_2')
-      expect(name3).toBe('Module_3')
+      expect(nameAfterReset).toBe('Module_1')
     })
 
-    it('should skip existing names', () => {
-      // Generate a few names
-      getNextModuleName() // Module_1
-      getNextModuleName() // Module_2
+    it('should skip active custom class IDs and visible node IDs', () => {
+      const activeClassNode = {
+        ...createNode('renamed-node-id', 'custom', 'EncoderBlock'),
+        data: {
+          nodeType: 'custom' as any,
+          label: 'EncoderBlock',
+          params: {},
+          isComposite: true,
+          isCustomComposite: true,
+          customClassId: 'Module_1',
+          isExpanded: false,
+          internalStructure: [],
+          internalEdges: [],
+          outputVar: 'x',
+          inputs: [],
+          outputs: [],
+          childNodeIds: [],
+          internalEdgeIds: [],
+        },
+      } as FlowHamsterNode
+      const renamedClassOldIdNode = {
+        ...activeClassNode,
+        id: 'Module_1',
+        data: {
+          ...activeClassNode.data,
+          label: 'BetterBlock',
+          customClassId: 'BetterBlock',
+        },
+      } as FlowHamsterNode
+      const visibleModule2Node = createNode('Module_2', 'relu', 'VisibleModule2')
 
-      // Reset and check it generates Module_1 again
-      resetModuleCounter()
-      const name = getNextModuleName()
-      expect(name).toBe('Module_1')
+      expect(getNextModuleNameForNodes([activeClassNode])).toBe('Module_2')
+      expect(getNextModuleNameForNodes([renamedClassOldIdNode])).toBe('Module_2')
+      expect(getNextModuleNameForNodes([activeClassNode, visibleModule2Node])).toBe('Module_3')
     })
   })
 

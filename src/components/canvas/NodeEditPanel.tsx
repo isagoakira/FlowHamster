@@ -1,7 +1,7 @@
 import { memo, useState, useEffect } from 'react'
 import { useGraphStore } from '../../hooks/useGraphStore'
 import { NODE_REGISTRY, CompositeNodeDefinition } from '../../utils/nodeRegistry'
-import { FlowHamsterNode } from '../../types/graph'
+import { CustomCompositeNodeData, FlowHamsterNode } from '../../types/graph'
 import { parsePythonCode, ParsedModule, generateModuleTemplate } from '../../utils/pythonCodeParser'
 import CompositeNodeViewer from './CompositeNodeViewer'
 
@@ -219,7 +219,9 @@ interface NodeEditPanelProps {
 export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps) {
   const updateNodeData = useGraphStore((s) => s.updateNodeData)
   const updateNodeLabel = useGraphStore((s) => s.updateNodeLabel)
+  const renamePackageClass = useGraphStore((s) => s.renamePackageClass)
   const [label, setLabel] = useState(node.data.label)
+  const [className, setClassName] = useState((node.data as CustomCompositeNodeData).customClassId ?? '')
   const [customCode, setCustomCode] = useState('')
   const [showCode, setShowCode] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -230,7 +232,8 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   const nodeType = node.data.nodeType
   const params = node.data.params || {}
   const paramConfig = NODE_PARAM_CONFIGS[nodeType] || []
-  const isCustomModule = nodeType === 'custom'
+  const isPackagedCustom = Boolean((node.data as CustomCompositeNodeData).isCustomComposite)
+  const isCustomModule = nodeType === 'custom' && !isPackagedCustom
 
   // Find composite node definition if this is a composite node
   const compositeDef = NODE_REGISTRY.flatMap(cat => cat.nodes).find(
@@ -242,6 +245,10 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   useEffect(() => {
     setLabel(node.data.label)
   }, [node.data.label])
+
+  useEffect(() => {
+    setClassName((node.data as CustomCompositeNodeData).customClassId ?? '')
+  }, [node.data])
 
   useEffect(() => {
     if (isCustomModule && params.custom_code) {
@@ -259,6 +266,13 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   const handleLabelChange = () => {
     if (label.trim() && label !== node.data.label) {
       updateNodeLabel(node.id, label.trim())
+    }
+  }
+
+  const handleClassNameChange = () => {
+    const currentClassName = (node.data as CustomCompositeNodeData).customClassId
+    if (className.trim() && currentClassName && className.trim() !== currentClassName) {
+      renamePackageClass(node.id, className.trim())
     }
   }
 
@@ -348,11 +362,11 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
       </div>
 
       <div style={{ flex: 1, overflow: 'auto' }}>
-        {/* 名称编辑 */}
-        <div style={sectionStyle}>
-          <label style={{ display: 'block', fontSize: 11, color: '#666', marginBottom: 6, textTransform: 'uppercase' }}>
-            Name
-          </label>
+	        {/* 名称编辑 */}
+	        <div style={sectionStyle}>
+	          <label style={{ display: 'block', fontSize: 11, color: '#666', marginBottom: 6, textTransform: 'uppercase' }}>
+	            Instance Name
+	          </label>
           <input
             value={label}
             onChange={(e) => setLabel(e.target.value)}
@@ -363,8 +377,27 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
               width: '100%',
               textAlign: 'left',
             }}
-          />
-        </div>
+	          />
+	        </div>
+
+	        {isPackagedCustom && (
+	          <div style={sectionStyle}>
+	            <label style={{ display: 'block', fontSize: 11, color: '#666', marginBottom: 6, textTransform: 'uppercase' }}>
+	              Class Name
+	            </label>
+	            <input
+	              value={className}
+	              onChange={(e) => setClassName(e.target.value)}
+	              onBlur={handleClassNameChange}
+	              onKeyDown={(e) => e.key === 'Enter' && handleClassNameChange()}
+	              style={{
+	                ...inputStyle,
+	                width: '100%',
+	                textAlign: 'left',
+	              }}
+	            />
+	          </div>
+	        )}
 
         {/* 自定义模块导入区域 */}
         {isCustomModule && (

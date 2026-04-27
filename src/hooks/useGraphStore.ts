@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { addEdge, applyNodeChanges, applyEdgeChanges, Connection, NodeChange, EdgeChange } from 'reactflow'
-import { FlowHamsterNode, FlowHamsterEdge, NodeData, CustomCompositeNodeData } from '../types/graph'
+import { FlowHamsterNode, FlowHamsterEdge, NodeData, CustomCompositeNodeData, SubModuleData } from '../types/graph'
 import {
   getAbsoluteNodePosition,
   getDescendantNodeIds,
@@ -10,11 +10,11 @@ import { getNodeComponentType, normalizeNodeData } from '../utils/nodeType'
 import { validateTemplateWithMessages } from '../utils/templateValidator'
 import { adaptBackendTemplate } from '../utils/adapters/templateAdapter'
 import { packageNodes, expandPackage, collapsePackage, fullyUnpackageGroup } from '../utils/subgraphPackager'
-import { registerCustomClass, updateCustomClass, getAllCustomClasses } from '../utils/customCompositeRegistry'
-import { SubModule, InternalEdge } from '../utils/nodeRegistry'
+import { registerCustomClass, updateCustomClass, unregisterCustomClass, getAllCustomClasses, getCustomClass } from '../utils/customCompositeRegistry'
 import { WorkflowBinding, WorkflowTrainingConfig } from '../schema/workflowDocument'
 import { createDefaultTrainingConfig } from '../utils/workflowDocument'
 import { makeGraphId } from '../utils/graphUtils'
+import { safePythonName } from '../utils/pythonNodeRegistry'
 
 export type MergeMode = 'concat' | 'add' | 'mul' | 'stack'
 export type WorkspaceMode = 'model' | 'data'
@@ -82,6 +82,108 @@ function syncGroupMetadata(nodes: FlowHamsterNode[], edges: FlowHamsterEdge[]) {
       },
     }
   }) as FlowHamsterNode[]
+}
+
+type PackageSnapshotModule = SubModuleData & {
+  internalStructure?: PackageSnapshotModule[]
+  data?: NodeData & Partial<CustomCompositeNodeData>
+}
+
+function renameClassRefsInInternalStructure(
+  internalStructure: PackageSnapshotModule[] | undefined,
+  oldClassName: string,
+  newClassName: string
+): PackageSnapshotModule[] | undefined {
+  if (!Array.isArray(internalStructure)) return internalStructure
+  return internalStructure.map((sub): PackageSnapshotModule => {
+    let data = sub.data
+    if (data) {
+      const nestedStructure = Array.isArray(data.internalStructure)
+        ? renameClassRefsInInternalStructure(data.internalStructure as PackageSnapshotModule[], oldClassName, newClassName)
+        : data.internalStructure
+      data = {
+        ...data,
+        customClassId: data.customClassId === oldClassName ? newClassName : data.customClassId,
+        label: data.customClassId === oldClassName && data.label === oldClassName ? newClassName : data.label,
+        internalStructure: nestedStructure,
+      }
+    }
+
+    const renamed: PackageSnapshotModule = {
+      ...sub,
+      customClassId: sub.customClassId === oldClassName ? newClassName : sub.customClassId,
+      data,
+    }
+    if (Array.isArray(sub.internalStructure)) {
+      renamed.internalStructure = renameClassRefsInInternalStructure(sub.internalStructure, oldClassName, newClassName)
+    }
+    return renamed
+  })
+}
+
+function internalStructureUsesClass(
+  internalStructure: PackageSnapshotModule[] | undefined,
+  className: string
+): boolean {
+  if (!Array.isArray(internalStructure)) return false
+  return internalStructure.some((sub) => {
+    const data = sub.data
+    return sub.customClassId === className ||
+      data?.customClassId === className ||
+      internalStructureUsesClass(sub.internalStructure, className) ||
+      internalStructureUsesClass(data?.internalStructure as PackageSnapshotModule[] | undefined, className)
+  })
+}
+
+function nodeUsesCustomClass(node: FlowHamsterNode, className: string): boolean {
+  const data = node.data as CustomCompositeNodeData
+  if (data?.isCustomComposite && data.customClassId === className) return true
+  return internalStructureUsesClass(data?.internalStructure as PackageSnapshotModule[] | undefined, className)
+}
+
+function cloneData<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function materializeCustomClassNodeData(data: NodeData): NodeData {
+  const customData = data as NodeData & Partial<CustomCompositeNodeData> & {
+    customClassRegistryId?: string
+    customClassId?: string
+  }
+  const registryId = customData.customClassRegistryId || String(customData.params?._customClassRegistryId ?? '')
+  const className = customData.customClassId || String(customData.params?._customClassName ?? '')
+  const customClass = registryId
+    ? getCustomClass(registryId)
+    : className
+      ? getAllCustomClasses().find((cls) => cls.name === className)
+      : undefined
+
+  if (customData.nodeType !== 'custom' || !customClass) {
+    return data
+  }
+
+  const instanceLabel = customData.label?.trim() || customClass.name
+  return {
+    nodeType: 'custom',
+    label: instanceLabel,
+    params: {},
+    isComposite: true,
+    isCustomComposite: true,
+    customClassId: customClass.name,
+    customClassRegistryId: customClass.id,
+    originClassId: customClass.originClassId ?? customClass.id,
+    isExpanded: false,
+    internalStructure: cloneData(customClass.internalStructure),
+    internalEdges: cloneData(customClass.internalEdges),
+    outputVar: customClass.outputVar,
+    inputs: cloneData(customClass.inputs ?? []),
+    outputs: cloneData(customClass.outputs ?? []),
+    childNodeIds: customClass.internalStructure.map((sub) => sub.id),
+    internalEdgeIds: customClass.internalEdges
+      .map((edge) => edge.id ?? `e_${edge.from}_${edge.to}`)
+      .filter((id): id is string => Boolean(id)),
+    boundaryEdges: cloneData(customClass.boundaryEdges ?? []),
+  } as CustomCompositeNodeData
 }
 
 interface GraphState {
@@ -389,7 +491,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   addNode: (data, position) => {
     const id = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
-    const normalizedData = normalizeNodeData(data)
+    const normalizedData = normalizeNodeData(materializeCustomClassNodeData(data) as NodeData)
     const newNode: FlowHamsterNode = { id, type: getNodeComponentType(normalizedData.nodeType), position, data: normalizedData }
     get().pushHistory()
     set((state) => {
@@ -493,7 +595,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     const selectedNodes = state.nodes.filter(
       (node) => state.selectedNodeIds.includes(node.id) &&
         !isGroupNode(node) &&
-        !(node.data as any)?.isCustomComposite  // exclude already-packaged composites
+        !((node.data as CustomCompositeNodeData)?.isCustomComposite && (node.data as CustomCompositeNodeData).isExpanded)
     )
 
     if (selectedNodes.length < 2) return
@@ -517,33 +619,41 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       centerPos
     )
 
-    // 注册为自定义类（用于代码生成）- 如果已存在同名类则复用
+    // 注册/更新为自定义类（用于代码生成）。类名按当前图计算；
+    // 如果 localStorage 里有同名旧类但当前图没有实例，允许用新的结构覆盖，避免旧模板污染。
     const existingClasses = getAllCustomClasses()
     const existingClass = existingClasses.find(c => c.name === pkgNode.data.customClassId)
 
-    if (!existingClass) {
-      // 只有不存在同名类时才注册
-      const internalStructure: SubModule[] = pkgNode.data.internalStructure.map((sm) => ({
-        id: sm.id,
-        type: sm.type as any,
-        label: sm.label,
-        params: sm.params,
-      }))
-      const internalEdges: InternalEdge[] = pkgNode.data.internalEdges.map((ie) => ({
-        from: ie.from,
-        to: ie.to,
-      }))
-
-      registerCustomClass(
+    let registeredClass = existingClass
+    if (existingClass) {
+      registeredClass = updateCustomClass(existingClass.id, {
+        internalStructure: pkgNode.data.internalStructure,
+        internalEdges: pkgNode.data.internalEdges,
+        outputVar: pkgNode.data.outputVar,
+        inputs: pkgNode.data.inputs,
+        outputs: pkgNode.data.outputs,
+        boundaryEdges: pkgNode.data.boundaryEdges,
+      }) ?? existingClass
+    } else {
+      registeredClass = registerCustomClass(
         pkgNode.data.customClassId, // name
         'custom', // baseType
         'other', // category
         '📦', // emoji
         'Custom packaged module', // description
-        internalStructure,
-        internalEdges,
-        pkgNode.data.outputVar
+        pkgNode.data.internalStructure,
+        pkgNode.data.internalEdges,
+        pkgNode.data.outputVar,
+        {
+          inputs: pkgNode.data.inputs,
+          outputs: pkgNode.data.outputs,
+          boundaryEdges: pkgNode.data.boundaryEdges,
+        }
       )
+    }
+    if (registeredClass) {
+      pkgNode.data.customClassRegistryId = registeredClass.id
+      pkgNode.data.originClassId = registeredClass.originClassId ?? registeredClass.id
     }
 
     // 移除被打包的节点（保留它们的数据在 pkgNode 中）
@@ -569,7 +679,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           return {
             ...e,
             target: pkgNode.id,
-            targetHandle: boundaryEdge?.internalHandle || e.targetHandle,
+            targetHandle: boundaryEdge?.groupHandleId || e.targetHandle,
           }
         }
         // 输出边：child -> external，重定向到 package -> external
@@ -580,7 +690,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           return {
             ...e,
             source: pkgNode.id,
-            sourceHandle: boundaryEdge?.internalHandle || e.sourceHandle,
+            sourceHandle: boundaryEdge?.groupHandleId || e.sourceHandle,
           }
         }
         return e
@@ -652,41 +762,18 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     )
     if (!node) return
 
-    const { customClassId } = node.data as CustomCompositeNodeData
-
-    // Count how many instances of this class exist in the graph
-    const instanceCount = state.nodes.filter(
-      (n) => (n.data as CustomCompositeNodeData)?.isCustomComposite &&
-             (n.data as CustomCompositeNodeData).customClassId === customClassId
-    ).length
-
     get().pushHistory()
 
-    if (instanceCount === 1) {
-      // Single instance: fully dissolve into individual nodes
-      const { nodes: newNodes, edges: newEdges } = fullyUnpackageGroup(
-        groupId,
-        state.nodes,
-        state.edges
-      )
-      set((store) => {
-        store.rfSetNodes?.(newNodes)
-        store.rfSetEdges?.(newEdges)
-        return { nodes: newNodes, edges: newEdges, selectedNodeIds: [] }
-      })
-    } else {
-      // Multiple instances: expand only this instance in-place
-      const { nodes: newNodes, edges: newEdges } = expandPackage(
-        node as any,
-        state.nodes,
-        state.edges
-      )
-      set((store) => {
-        store.rfSetNodes?.(newNodes)
-        store.rfSetEdges?.(newEdges)
-        return { nodes: newNodes, edges: newEdges, selectedNodeIds: [groupId] }
-      })
-    }
+    const { nodes: newNodes, edges: newEdges } = fullyUnpackageGroup(
+      groupId,
+      state.nodes,
+      state.edges
+    )
+    set((store) => {
+      store.rfSetNodes?.(newNodes)
+      store.rfSetEdges?.(newEdges)
+      return { nodes: newNodes, edges: newEdges, selectedNodeIds: [], selectedEdgeIds: [] }
+    })
   },
 
   renamePackage: (groupId: string, newName: string) => {
@@ -713,26 +800,67 @@ export const useGraphStore = create<GraphState>((set, get) => ({
     if (!node) return
 
     const oldClassName = (node.data as CustomCompositeNodeData).customClassId
+    newClassName = safePythonName(newClassName.trim())
+    if (!newClassName) return
     if (oldClassName === newClassName) return
 
     // Update class name in the registry
     const allClasses = getAllCustomClasses()
-    const classToRename = allClasses.find(c => c.name === oldClassName)
+    const conflict = allClasses.find(c => c.name === newClassName)
+    if (conflict) {
+      const activeConflict = state.nodes.some((n) => nodeUsesCustomClass(n, newClassName))
+      if (activeConflict) return
+      unregisterCustomClass(conflict.id)
+    }
+
+    const oldClassRegistryId = (node.data as CustomCompositeNodeData).customClassRegistryId
+    const classToRename = allClasses.find(c => c.id === oldClassRegistryId) ?? allClasses.find(c => c.name === oldClassName)
     if (classToRename) {
       updateCustomClass(classToRename.id, { name: newClassName })
     }
 
-    // Update all instances: keep node IDs stable (critical!), only update class ref and label
+    for (const cls of allClasses) {
+      const renamedInternalStructure = renameClassRefsInInternalStructure(
+        cls.internalStructure,
+        oldClassName,
+        newClassName
+      )
+      if (renamedInternalStructure !== cls.internalStructure) {
+        updateCustomClass(cls.id, { internalStructure: renamedInternalStructure as any })
+      }
+    }
+
+    // Update all instances and nested package snapshots. Node IDs stay stable
+    // because edges reference instances by node id.
     const newNodes = state.nodes.map((n) => {
       if ((n.data as CustomCompositeNodeData)?.isCustomComposite &&
-          (n.data as CustomCompositeNodeData).customClassId === oldClassName) {
-        // node.id is NOT changed — edges reference it by id, must stay stable
+          ((n.data as CustomCompositeNodeData).customClassId === oldClassName ||
+           (oldClassRegistryId && (n.data as CustomCompositeNodeData).customClassRegistryId === oldClassRegistryId))) {
         return {
           ...n,
           data: {
             ...n.data,
             customClassId: newClassName,
-            label: newClassName,
+            customClassRegistryId: oldClassRegistryId ?? (n.data as CustomCompositeNodeData).customClassRegistryId,
+            label: n.data.label === oldClassName ? newClassName : n.data.label,
+            internalStructure: renameClassRefsInInternalStructure(
+              (n.data as CustomCompositeNodeData).internalStructure,
+              oldClassName,
+              newClassName
+            ),
+          },
+        }
+      }
+      if (nodeUsesCustomClass(n, oldClassName)) {
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            internalStructure: renameClassRefsInInternalStructure(
+              (n.data as CustomCompositeNodeData).internalStructure,
+              oldClassName,
+              newClassName
+            ),
           },
         }
       }
@@ -840,6 +968,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
           internalEdgeIds: Array.isArray(node.data.internalEdgeIds)
             ? node.data.internalEdgeIds.map((edgeId) => edgeIdMap.get(edgeId) ?? edgeId)
             : node.data.internalEdgeIds,
+          boundaryEdges: Array.isArray(node.data.boundaryEdges)
+            ? node.data.boundaryEdges.map((edge: any) => ({
+                ...edge,
+                originalEdgeId: edgeIdMap.get(edge.originalEdgeId) ?? edge.originalEdgeId,
+                source: nodeIdMap.get(edge.source) ?? edge.source,
+                target: nodeIdMap.get(edge.target) ?? edge.target,
+              }))
+            : node.data.boundaryEdges,
         },
       }
 

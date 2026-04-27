@@ -1,4 +1,4 @@
-import { useCallback, DragEvent, useState, useEffect, useMemo } from 'react'
+import { useCallback, DragEvent, useState, useEffect, useMemo, useRef } from 'react'
 import ReactFlow, {
   Background,
   Controls,
@@ -16,7 +16,7 @@ import ReactFlow, {
 import 'reactflow/dist/style.css'
 import { useGraphStore, MergeMode } from '../../hooks/useGraphStore'
 import { useClipboardStore } from '../../stores/useClipboardStore'
-import { NodeData, FlowHamsterNode } from '../../types/graph'
+import { NodeData, FlowHamsterNode, CustomCompositeNodeData } from '../../types/graph'
 import NodeEditPanel from './NodeEditPanel'
 import { normalizeNodeData, normalizeNodeType } from '../../utils/nodeType'
 import { getReactFlowNodeTypes } from '../../utils/nodeComponentRegistry'
@@ -201,7 +201,10 @@ function FlowCanvas() {
   const [editingNode, setEditingNode] = useState<FlowHamsterNode | null>(null)
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; nodeId: string } | null>(null)
+  const nodeWasDraggedRef = useRef(false)
   const unpackageGroup = useGraphStore((s) => s.unpackageGroup)
+  const renamePackage = useGraphStore((s) => s.renamePackage)
+  const renamePackageClass = useGraphStore((s) => s.renamePackageClass)
   // Package viewer state
   const packageViewerOpen = useGraphStore((s) => s.packageViewerOpen)
   const packageViewerData = useGraphStore((s) => s.packageViewerData)
@@ -369,17 +372,34 @@ function FlowCanvas() {
     setSelectedEdge(edge)
   }, [])
 
+  const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
+    if (nodeWasDraggedRef.current) {
+      nodeWasDraggedRef.current = false
+      return
+    }
+    if (event.ctrlKey || event.metaKey || event.shiftKey) {
+      setEditingNode(null)
+      return
+    }
+    setSelectedEdge(null)
+    setEditingNode(node as unknown as FlowHamsterNode)
+  }, [])
+
+  const onNodeDragStart = useCallback(() => {
+    nodeWasDraggedRef.current = false
+  }, [])
+
+  const onNodeDrag = useCallback(() => {
+    nodeWasDraggedRef.current = true
+  }, [])
+
   const onSelectionChange = useCallback(
     ({ nodes: selectedNodes, edges: selectedEdges }: OnSelectionChangeParams) => {
       setSelection(
         selectedNodes.map((node) => node.id),
         selectedEdges.map((edge) => edge.id)
       )
-      // 当选中单个节点时，打开编辑面板
-      if (selectedNodes.length === 1) {
-        const node = selectedNodes[0] as unknown as FlowHamsterNode
-        setEditingNode(node)
-      } else {
+      if (selectedNodes.length !== 1) {
         setEditingNode(null)
       }
     },
@@ -396,13 +416,32 @@ function FlowCanvas() {
       event.preventDefault()
       const data = event.dataTransfer.getData('application/flowhamster')
       if (!data) return
-        const { nodeType, label, defaultParams } = JSON.parse(data) as {
-        nodeType: string; label: string; defaultParams: Record<string, number | string | boolean>
+      const {
+        nodeType,
+        label,
+        defaultParams,
+        customClassRegistryId,
+        customClassId,
+        originClassId,
+      } = JSON.parse(data) as {
+        nodeType: string
+        label: string
+        defaultParams: Record<string, number | string | boolean>
+        customClassRegistryId?: string
+        customClassId?: string
+        originClassId?: string
       }
       const normalizedType = normalizeNodeType(nodeType)
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
       useGraphStore.getState().addNode(
-        normalizeNodeData({ nodeType: normalizedType, label, params: { ...defaultParams } } as NodeData),
+        normalizeNodeData({
+          nodeType: normalizedType,
+          label,
+          params: { ...defaultParams },
+          customClassRegistryId,
+          customClassId,
+          originClassId,
+        } as NodeData),
         position
       )
     },
@@ -456,6 +495,9 @@ function FlowCanvas() {
         onNodesDelete={onNodesDelete}
         onEdgesDelete={onEdgesDelete}
         onEdgeClick={onEdgeClick}
+        onNodeClick={onNodeClick}
+        onNodeDragStart={onNodeDragStart}
+        onNodeDrag={onNodeDrag}
         onSelectionChange={onSelectionChange}
         onPaneClick={() => {
           clearSelection()
@@ -513,8 +555,8 @@ function FlowCanvas() {
 
       {/* Context Menu for Custom Composite Nodes */}
       {contextMenu && (
-        <div
-          style={{
+	          <div
+	            style={{
             position: 'fixed',
             top: contextMenu.y,
             left: contextMenu.x,
@@ -526,11 +568,59 @@ function FlowCanvas() {
             minWidth: '160px',
             boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
           }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div
-            style={{
-              padding: '8px 16px',
+	          onClick={(e) => e.stopPropagation()}
+	        >
+	          <div
+	            style={{
+	              padding: '8px 16px',
+	              cursor: 'pointer',
+	              color: '#22d3ee',
+	              fontSize: '13px',
+	              display: 'flex',
+	              alignItems: 'center',
+	              gap: '8px',
+	            }}
+	            onClick={() => {
+	              const node = useGraphStore.getState().nodes.find((n) => n.id === contextMenu.nodeId)
+	              const currentName = node?.data.label || 'Module'
+	              const newName = window.prompt('请输入新的实例名称:', currentName)
+	              if (newName?.trim() && newName.trim() !== currentName) {
+	                renamePackage(contextMenu.nodeId, newName.trim())
+	              }
+	              setContextMenu(null)
+	            }}
+	            onMouseEnter={(e) => (e.currentTarget.style.background = '#2a2a2a')}
+	            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+	          >
+	            ✏️ 重命名实例
+	          </div>
+	          <div
+	            style={{
+	              padding: '8px 16px',
+	              cursor: 'pointer',
+	              color: '#a78bfa',
+	              fontSize: '13px',
+	              display: 'flex',
+	              alignItems: 'center',
+	              gap: '8px',
+	            }}
+	            onClick={() => {
+	              const node = useGraphStore.getState().nodes.find((n) => n.id === contextMenu.nodeId)
+	              const currentClassName = (node?.data as CustomCompositeNodeData | undefined)?.customClassId || 'Module_1'
+	              const newClassName = window.prompt('请输入新的类名称:', currentClassName)
+	              if (newClassName?.trim() && newClassName.trim() !== currentClassName) {
+	                renamePackageClass(contextMenu.nodeId, newClassName.trim())
+	              }
+	              setContextMenu(null)
+	            }}
+	            onMouseEnter={(e) => (e.currentTarget.style.background = '#2a2a2a')}
+	            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+	          >
+	            🏷️ 重命名类
+	          </div>
+	          <div
+	            style={{
+	              padding: '8px 16px',
               cursor: 'pointer',
               color: '#ccc',
               fontSize: '13px',

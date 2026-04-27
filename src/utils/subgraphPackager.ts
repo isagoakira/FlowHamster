@@ -17,17 +17,150 @@ import {
   GroupPort,
   SubModuleData,
   InternalEdgeData,
+  NodeData,
   NodeType,
 } from '../types/graph'
 import { getNodeComponentType } from './nodeType'
-import { getAllCustomClasses } from './customCompositeRegistry'
 
 // 自定义复合模块的节点类型 (必须是 'customNode' 以匹配 nodeTypes 注册表)
 const CUSTOM_COMPOSITE_TYPE = 'customNode'
 
-// 模块计数器，用于生成可读的模块名称
-// 注意：此计数器仅在当前会话内有效，不持久化到 localStorage
-// 这样可以避免刷新页面后编号继续递增的问题
+function cloneData<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function uniqueId(baseId: string, usedIds: Set<string>): string {
+  if (!usedIds.has(baseId)) {
+    usedIds.add(baseId)
+    return baseId
+  }
+
+  let index = 1
+  let candidate = `${baseId}_${index}`
+  while (usedIds.has(candidate)) {
+    index += 1
+    candidate = `${baseId}_${index}`
+  }
+  usedIds.add(candidate)
+  return candidate
+}
+
+function createIdMap(
+  internalStructure: SubModuleData[],
+  allNodes: FlowHamsterNode[],
+  groupId: string
+): Map<string, string> {
+  const usedIds = new Set(allNodes.filter((node) => node.id !== groupId).map((node) => node.id))
+  const idMap = new Map<string, string>()
+
+  for (const sub of internalStructure) {
+    idMap.set(sub.id, uniqueId(sub.id, usedIds))
+  }
+
+  return idMap
+}
+
+function restoreNodeFromSubModule(
+  sub: SubModuleData,
+  idMap: Map<string, string>,
+  fallbackPosition: { x: number; y: number },
+  parentNode?: string
+): FlowHamsterNode {
+  const nodeData = sub.data
+    ? cloneData(sub.data)
+    : ({
+        nodeType: sub.type as NodeType,
+        label: sub.label,
+        params: { ...sub.params },
+      } as NodeData)
+
+  const restored: FlowHamsterNode = {
+    id: idMap.get(sub.id) ?? sub.id,
+    type: getNodeComponentType(String(nodeData.nodeType ?? sub.type)),
+    position: sub.position || fallbackPosition,
+    data: nodeData,
+    ...(parentNode ? { parentNode, extent: 'parent' as const } : {}),
+  } as FlowHamsterNode
+
+  if (sub.customClassId) {
+    ;(restored.data as CustomCompositeNodeData).isComposite = true
+    ;(restored.data as CustomCompositeNodeData).isCustomComposite = true
+    ;(restored.data as CustomCompositeNodeData).customClassId = sub.customClassId
+    ;(restored.data as CustomCompositeNodeData).isExpanded = false
+  }
+
+  return restored
+}
+
+function uniqueEdgeId(baseId: string, usedIds: Set<string>): string {
+  return uniqueId(baseId, usedIds)
+}
+
+function getVisibleGroupChildIds(
+  groupId: string,
+  allNodes: FlowHamsterNode[],
+  data: CustomCompositeNodeData
+): Set<string> {
+  const childNodeIds = new Set(data.childNodeIds ?? [])
+  return new Set(
+    allNodes
+      .filter((node) => {
+        const parentId = node.parentNode ?? node.parentId
+        return parentId === groupId || (data.isExpanded && childNodeIds.has(node.id))
+      })
+      .map((node) => node.id)
+  )
+}
+
+function findBoundaryMapping(
+  boundaryEdges: BoundaryEdgeData[],
+  direction: 'input' | 'output',
+  edge: FlowHamsterEdge
+): BoundaryEdgeData | undefined {
+  const groupHandleId = direction === 'input' ? edge.targetHandle : edge.sourceHandle
+  return boundaryEdges.find((be) => be.direction === direction && be.originalEdgeId === edge.id) ??
+    boundaryEdges.find((be) => be.direction === direction && be.groupHandleId === groupHandleId) ??
+    boundaryEdges.find((be) => be.direction === direction)
+}
+
+function restoreCurrentBoundaryEdges(
+  groupId: string,
+  allEdges: FlowHamsterEdge[],
+  boundaryEdges: BoundaryEdgeData[] | undefined,
+  idMap: Map<string, string>
+): FlowHamsterEdge[] {
+  const mappings = boundaryEdges ?? []
+  const restored: FlowHamsterEdge[] = []
+
+  for (const edge of allEdges) {
+    if (edge.target === groupId) {
+      const mapping = findBoundaryMapping(mappings, 'input', edge)
+      if (!mapping) continue
+      restored.push({
+        id: edge.id,
+        source: edge.source,
+        target: idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: mapping.targetHandle ?? (mapping.internalHandle !== 'default' ? mapping.internalHandle : null),
+      })
+    } else if (edge.source === groupId) {
+      const mapping = findBoundaryMapping(mappings, 'output', edge)
+      if (!mapping) continue
+      restored.push({
+        id: edge.id,
+        source: idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId,
+        target: edge.target,
+        sourceHandle: mapping.sourceHandle ?? (mapping.internalHandle !== 'default' ? mapping.internalHandle : null),
+        targetHandle: edge.targetHandle,
+      })
+    }
+  }
+
+  return restored
+}
+
+// Kept only for backwards-compatible tests; names are now derived from the
+// active graph rather than session/global localStorage state.
 let moduleCounter = 0
 
 /**
@@ -35,20 +168,25 @@ let moduleCounter = 0
  * 确保持续生成唯一的模块名称，避免与已存在的类名冲突
  */
 export function getNextModuleName(): string {
-  const existingNames = new Set(getAllCustomClasses().map(c => c.name))
+  return getNextModuleNameForNodes([])
+}
 
-  // 如果当前计数器对应的名称已被使用，则递增直到找到可用名称
-  while (true) {
-    moduleCounter++
-    const name = `Module_${moduleCounter}`
+export function getNextModuleNameForNodes(nodes: FlowHamsterNode[]): string {
+  const existingNames = new Set(
+    nodes.flatMap((node) => [
+      node.id,
+      (node.data as CustomCompositeNodeData)?.customClassId,
+    ]).filter((name): name is string => Boolean(name))
+  )
+
+  for (let index = 1; index <= 1000; index++) {
+    const name = `Module_${index}`
     if (!existingNames.has(name)) {
       return name
     }
-    // 如果计数器过大（超过1000），重置以避免无限循环
-    if (moduleCounter > 1000) {
-      moduleCounter = 0
-    }
   }
+  moduleCounter += 1
+  return `Module_${Date.now()}_${moduleCounter}`
 }
 
 /**
@@ -66,6 +204,7 @@ export interface BoundaryEdgeData {
   direction: 'input' | 'output'
   internalNodeId: string
   internalHandle: string
+  groupHandleId: string
   // 原始边的完整信息（用于恢复）
   source: string
   target: string
@@ -94,48 +233,54 @@ function inferBoundaryInfo(
 
     if (isInput) {
       const key = `${edge.target}-${edge.targetHandle || 'default'}`
+      let groupHandleId = inputPorts.find((port) => port.nodeId === edge.target && port.label === (edge.targetHandle || 'input'))?.handleId
       if (!seenInputs.has(key)) {
         seenInputs.add(key)
+        groupHandleId = `input_${inputPorts.length}`
         inputPorts.push({
-          id: `input_${inputPorts.length}`,
-          handleId: edge.targetHandle || 'default',
+          id: groupHandleId,
+          handleId: groupHandleId,
           label: edge.targetHandle || 'input',
           nodeId: edge.target,
           edgeId: edge.id,
         })
-        boundaryEdges.push({
-          originalEdgeId: edge.id,
-          direction: 'input',
-          internalNodeId: edge.target,
-          internalHandle: edge.targetHandle || 'default',
-          source: edge.source,
-          target: edge.target,
-          sourceHandle: edge.sourceHandle,
-          targetHandle: edge.targetHandle,
-        })
       }
+      boundaryEdges.push({
+        originalEdgeId: edge.id,
+        direction: 'input',
+        internalNodeId: edge.target,
+        internalHandle: edge.targetHandle || 'default',
+        groupHandleId: groupHandleId || 'input_0',
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+      })
     } else if (isOutput) {
       const key = `${edge.source}-${edge.sourceHandle || 'default'}`
+      let groupHandleId = outputPorts.find((port) => port.nodeId === edge.source && port.label === (edge.sourceHandle || 'output'))?.handleId
       if (!seenOutputs.has(key)) {
         seenOutputs.add(key)
+        groupHandleId = `output_${outputPorts.length}`
         outputPorts.push({
-          id: `output_${outputPorts.length}`,
-          handleId: edge.sourceHandle || 'default',
+          id: groupHandleId,
+          handleId: groupHandleId,
           label: edge.sourceHandle || 'output',
           nodeId: edge.source,
           edgeId: edge.id,
         })
-        boundaryEdges.push({
-          originalEdgeId: edge.id,
-          direction: 'output',
-          internalNodeId: edge.source,
-          internalHandle: edge.sourceHandle || 'default',
-          source: edge.source,
-          target: edge.target,
-          sourceHandle: edge.sourceHandle,
-          targetHandle: edge.targetHandle,
-        })
       }
+      boundaryEdges.push({
+        originalEdgeId: edge.id,
+        direction: 'output',
+        internalNodeId: edge.source,
+        internalHandle: edge.sourceHandle || 'default',
+        groupHandleId: groupHandleId || 'output_0',
+        source: edge.source,
+        target: edge.target,
+        sourceHandle: edge.sourceHandle,
+        targetHandle: edge.targetHandle,
+      })
     }
   }
 
@@ -236,6 +381,7 @@ export function packageNodes(
       label: node.data.label,
       params: { ...node.data.params },
       position: { x: node.position.x, y: node.position.y },
+      data: cloneData(node.data),
     }
     // If it's a custom composite node, preserve the customClassId
     if (node.data.nodeType === 'custom' && (node.data as CustomCompositeNodeData).customClassId) {
@@ -247,6 +393,7 @@ export function packageNodes(
     return base
   })
   const internalEdges: InternalEdgeData[] = internalEdgesRaw.map((edge) => ({
+    id: edge.id,
     from: edge.source,
     to: edge.target,
     fromHandle: edge.sourceHandle ?? undefined,
@@ -254,7 +401,7 @@ export function packageNodes(
   }))
 
   // 生成唯一类 ID（使用提供的名称或自动生成）
-  const customClassId = moduleName || getNextModuleName()
+  const customClassId = moduleName || getNextModuleNameForNodes(nodes)
 
   // 计算包节点大小（基于端口数量）
   const portCount = Math.max(inputPorts.length, outputPorts.length, 1)
@@ -303,81 +450,34 @@ export function expandPackage(
     return { nodes: allNodes, edges: allEdges }
   }
 
+  const liveGroup = allNodes.find((node) => node.id === groupNode.id) as Node<CustomCompositeNodeData> | undefined
+  if ((liveGroup?.data as CustomCompositeNodeData | undefined)?.isExpanded) {
+    return { nodes: allNodes, edges: allEdges }
+  }
+
   const data = groupNode.data as CustomCompositeNodeData
-  const { internalStructure, internalEdges: storedEdges, childNodeIds, boundaryEdges } = data
+  const { internalStructure, internalEdges: storedEdges, boundaryEdges } = data
 
   // 计算组内节点的位置（使用原始位置或包节点位置作为基础）
   const baseX = groupNode.position.x
   const baseY = groupNode.position.y
 
-  // Build a mapping: composite sub-nodes get fresh instance IDs to avoid
-  // collisions when the same composite class has multiple instances.
-  // Regular nodes keep their original IDs.
-  const idMap = new Map<string, string>()
-  for (const sub of internalStructure) {
-    if ((sub as any).customClassId) {
-      // Composite sub-node: assign a fresh instance ID
-      idMap.set(sub.id, `${(sub as any).customClassId}_instance_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`)
-    }
-    // else: keep original node ID
-  }
+  const visibleChildIds = getVisibleGroupChildIds(groupNode.id, allNodes, data)
+  const collisionNodes = allNodes.filter((node) => !visibleChildIds.has(node.id))
+  const idMap = createIdMap(internalStructure, collisionNodes, groupNode.id)
 
   // 恢复内部节点（使用原始位置，composite 子节点使用新 ID）
-  const internalNodes: FlowHamsterNode[] = internalStructure.map((sub) => {
-    const newId = idMap.get(sub.id) ?? sub.id
-    const position = sub.position || {
-      x: baseX + 220,
-      y: baseY + 60,
-    }
-    const baseNode: FlowHamsterNode = {
-      id: newId,
-      type: getNodeComponentType(sub.type),
-      position,
-      data: {
-        nodeType: sub.type as NodeType,
-        label: sub.label,
-        params: { ...sub.params },
-      },
-      parentNode: groupNode.id,
-      extent: 'parent',
-    } as FlowHamsterNode
+  const internalNodes: FlowHamsterNode[] = internalStructure.map((sub) => (
+    restoreNodeFromSubModule(sub, idMap, { x: baseX + 220, y: baseY + 60 }, groupNode.id)
+  ))
 
-    // If it's a nested composite, preserve its class identity and mark non-expanded
-    if ((sub as any).customClassId) {
-      ;(baseNode.data as any).isCustomComposite = true
-      ;(baseNode.data as any).customClassId = (sub as any).customClassId
-      ;(baseNode.data as any).isExpanded = false
-    }
-
-    return baseNode
-  })
-
-  // 恢复外部边（使用边界边信息，重定向到内部节点）
-  const restoredExternalEdges: FlowHamsterEdge[] = []
-
-  if (boundaryEdges) {
-    for (const be of boundaryEdges as BoundaryEdgeData[]) {
-      if (be.direction === 'input') {
-        // 输入边：外部 -> 内部，重定向到外部 -> 内部节点
-        restoredExternalEdges.push({
-          id: be.originalEdgeId,
-          source: be.source,
-          target: idMap.get(be.internalNodeId) ?? be.internalNodeId, // 重定向到内部节点
-          sourceHandle: be.sourceHandle,
-          targetHandle: be.internalHandle,
-        })
-      } else {
-        // 输出边：内部 -> 外部，重定向到内部节点 -> 外部
-        restoredExternalEdges.push({
-          id: be.originalEdgeId,
-          source: idMap.get(be.internalNodeId) ?? be.internalNodeId, // 重定向到内部节点
-          target: be.target,
-          sourceHandle: be.internalHandle,
-          targetHandle: be.targetHandle,
-        })
-      }
-    }
-  }
+  // 恢复当前实例真实存在的外部边；boundaryEdges 只作为 handle -> 内部节点的映射模板。
+  const restoredExternalEdges = restoreCurrentBoundaryEdges(
+    groupNode.id,
+    allEdges,
+    boundaryEdges as BoundaryEdgeData[] | undefined,
+    idMap
+  )
 
   // 标记组为展开状态
   const updatedGroup: FlowHamsterNode = {
@@ -389,29 +489,29 @@ export function expandPackage(
   } as FlowHamsterNode
 
   // 过滤掉被包装的子节点，但排除组节点本身（由 updatedGroup 替代）
-  const childNodeIdSet = new Set(childNodeIds)
   const filteredNodes = allNodes.filter(
-    (n) => !childNodeIdSet.has(n.id) && n.id !== groupNode.id
+    (n) => !visibleChildIds.has(n.id) && n.id !== groupNode.id
   )
 
-  // 过滤掉内部边和边界边（它们会在下面重新添加）
-  const internalEdgeIdSet = new Set(data.internalEdgeIds)
-  const boundaryEdgeIds = new Set((boundaryEdges as BoundaryEdgeData[])?.map((be) => be.originalEdgeId) || [])
-  const allRemovedEdgeIds = new Set([...internalEdgeIdSet, ...boundaryEdgeIds])
-  const filteredEdges = allEdges.filter((e) => !allRemovedEdgeIds.has(e.id))
+  // 移除当前实例的 package 边和已存在的可见内部边，避免误删其他实例/其他节点的同名边。
+  const filteredEdges = allEdges.filter((edge) =>
+    edge.source !== groupNode.id &&
+    edge.target !== groupNode.id &&
+    !visibleChildIds.has(edge.source) &&
+    !visibleChildIds.has(edge.target)
+  )
 
   // 恢复内部边（使用新 ID 映射）
   // 检查是否已存在同名边，避免重复添加（处理重新展开的情况）
   const existingEdgeIds = new Set(filteredEdges.map(e => e.id))
   const internalEdgeList: FlowHamsterEdge[] = storedEdges
     .map((edge) => ({
-      id: `e_${edge.from}_${edge.to}`,
+      id: uniqueEdgeId(edge.id || `e_${edge.from}_${edge.to}`, existingEdgeIds),
       source: idMap.get(edge.from) ?? edge.from,
       target: idMap.get(edge.to) ?? edge.to,
       sourceHandle: edge.fromHandle,
       targetHandle: edge.toHandle,
     }))
-    .filter(edge => !existingEdgeIds.has(edge.id))
 
   return {
     nodes: [...filteredNodes, ...internalNodes, updatedGroup],
@@ -436,8 +536,7 @@ export function collapsePackage(
   }
 
   const data = groupNode.data as CustomCompositeNodeData
-  const { childNodeIds, internalEdgeIds, internalEdges, boundaryEdges } = data
-  const childNodeIdSet = new Set(childNodeIds)
+  const visibleChildIds = getVisibleGroupChildIds(groupId, allNodes, data)
 
   // 标记组为收起状态
   const updatedGroup: FlowHamsterNode = {
@@ -450,19 +549,15 @@ export function collapsePackage(
 
   // 移除内部节点
   const filteredNodes = allNodes.filter(
-    (n) => !childNodeIdSet.has(n.id) && n.id !== groupId
+    (n) => !visibleChildIds.has(n.id) && n.id !== groupId
   )
 
-  // 移除内部边和边界边
-  // 也需要移除 expandPackage 生成的新边 ID（格式：e_${from}_${to}）
-  const generatedEdgeIds = new Set(
-    (internalEdges || []).map((ie: InternalEdgeData) => `e_${ie.from}_${ie.to}`)
+  const filteredEdges = allEdges.filter((edge) =>
+    edge.source !== groupId &&
+    edge.target !== groupId &&
+    !visibleChildIds.has(edge.source) &&
+    !visibleChildIds.has(edge.target)
   )
-  const internalEdgeIdSet = new Set(internalEdgeIds)
-  const boundaryEdgeIds = new Set((boundaryEdges as BoundaryEdgeData[])?.map((be) => be.originalEdgeId) || [])
-  const allRemovedIds = new Set([...internalEdgeIdSet, ...generatedEdgeIds, ...boundaryEdgeIds])
-
-  const filteredEdges = allEdges.filter((e) => !allRemovedIds.has(e.id))
 
   return {
     nodes: [...filteredNodes, updatedGroup],
@@ -490,78 +585,48 @@ export function fullyUnpackageGroup(
   const data = groupNode.data as CustomCompositeNodeData
   const { internalStructure, internalEdges: storedEdges, boundaryEdges } = data
 
-  // Build ID map: give composite sub-nodes fresh instance IDs to avoid
-  // collisions with other instances of the same class elsewhere in the graph.
-  const idMap = new Map<string, string>()
-  for (const sub of internalStructure) {
-    if ((sub as any).customClassId) {
-      idMap.set(sub.id, `${(sub as any).customClassId}_instance_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`)
-    }
-  }
+  const visibleChildIds = getVisibleGroupChildIds(groupId, allNodes, data)
+  const collisionNodes = allNodes.filter((node) => !visibleChildIds.has(node.id))
+  const idMap = createIdMap(internalStructure, collisionNodes, groupId)
 
   // 恢复内部节点（使用原始位置，composite 子节点使用新 ID）
-  const restoredNodes: FlowHamsterNode[] = internalStructure.map((sub) => {
-    const newId = idMap.get(sub.id) ?? sub.id
-    const position = sub.position || {
-      x: groupNode.position.x + 220,
-      y: groupNode.position.y + 60,
-    }
-    const base: FlowHamsterNode = {
-      id: newId,
-      type: getNodeComponentType(sub.type),
-      position,
-      data: {
-        nodeType: sub.type as NodeType,
-        label: sub.label,
-        params: { ...sub.params },
-      },
-    } as FlowHamsterNode
-
-    // If it's a nested composite, preserve class identity as collapsed instance
-    if ((sub as any).customClassId) {
-      ;(base.data as any).isCustomComposite = true
-      ;(base.data as any).customClassId = (sub as any).customClassId
-      ;(base.data as any).isExpanded = false
-    }
-
-    return base
-  })
+  const restoredNodes: FlowHamsterNode[] = internalStructure.map((sub) => (
+    restoreNodeFromSubModule(sub, idMap, { x: groupNode.position.x + 220, y: groupNode.position.y + 60 })
+  ))
 
   // 恢复内部边（使用新 ID 映射）
+  const usedEdgeIds = new Set(allEdges.filter((edge) => edge.id && edge.id !== groupId).map((edge) => edge.id!))
   const restoredEdges: FlowHamsterEdge[] = storedEdges.map((edge) => ({
-    id: `e_${edge.from}_${edge.to}`,
+    id: uniqueEdgeId(edge.id || `e_${edge.from}_${edge.to}`, usedEdgeIds),
     source: idMap.get(edge.from) ?? edge.from,
     target: idMap.get(edge.to) ?? edge.to,
     sourceHandle: edge.fromHandle,
     targetHandle: edge.toHandle,
   }))
 
-  // 恢复外部边（使用边界边信息，保留原始 ID，内部引用使用新 ID）
-  if (boundaryEdges) {
-    for (const be of boundaryEdges as BoundaryEdgeData[]) {
-      restoredEdges.push({
-        id: be.originalEdgeId,
-        source: be.source,
-        target: idMap.get(be.internalNodeId) ?? be.internalNodeId,
-        sourceHandle: be.sourceHandle,
-        targetHandle: be.internalHandle,
-      })
-    }
-  }
+  restoredEdges.push(...restoreCurrentBoundaryEdges(
+    groupId,
+    allEdges,
+    boundaryEdges as BoundaryEdgeData[] | undefined,
+    idMap
+  ))
 
-  // 过滤掉组节点和内部边
-  const filteredNodes = allNodes.filter((n) => n.id !== groupId)
-  const internalEdgeIdSet = new Set(data.internalEdgeIds)
-  const boundaryEdgeIds = new Set((boundaryEdges as BoundaryEdgeData[])?.map((be) => be.originalEdgeId) || [])
-  const allRemovedIds = new Set([...internalEdgeIdSet, ...boundaryEdgeIds])
-
-  const filteredEdges = allEdges.filter((e) => !allRemovedIds.has(e.id))
+  // 只移除这个实例当前可见的壳、子节点和连接，不能按历史 hidden edge id 误删其他实例的边。
+  const filteredNodes = allNodes.filter((n) => n.id !== groupId && !visibleChildIds.has(n.id))
+  const filteredEdges = allEdges.filter((edge) =>
+    edge.source !== groupId &&
+    edge.target !== groupId &&
+    !visibleChildIds.has(edge.source) &&
+    !visibleChildIds.has(edge.target)
+  )
 
   return {
     nodes: [...filteredNodes, ...restoredNodes],
     edges: [...filteredEdges, ...restoredEdges],
   }
 }
+
+export const unpackageGroup = fullyUnpackageGroup
 
 /**
  * 获取组的大小（基于内容和端口）

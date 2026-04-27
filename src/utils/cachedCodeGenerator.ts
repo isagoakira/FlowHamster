@@ -8,6 +8,8 @@
 import { generateLocalCode } from './codeGenerator'
 import { useCodeCacheStore, computeGraphSnapshot } from '../stores/codeCache'
 
+const CODE_GENERATOR_VERSION = 'class-instance-v2'
+
 interface CodeGeneratorParams {
   dataGraphNodes?: any[]
   dataGraphEdges?: any[]
@@ -26,7 +28,7 @@ export function getCachedOrGenerateCode(
   params: CodeGeneratorParams
 ): string {
   // Compute graph snapshot for cache key
-  const graphSnapshot = computeGraphSnapshot(nodes, edges)
+  const graphSnapshot = `${CODE_GENERATOR_VERSION}:${computeGraphSnapshot(nodes, edges)}`
 
   // Try to get cached code
   const cached = useCodeCacheStore.getState().get('default', graphSnapshot)

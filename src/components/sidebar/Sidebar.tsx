@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { useGraphStore } from '../../hooks/useGraphStore'
 import { Template, useTemplateStore } from '../../utils/templateRegistry'
 import { NODE_REGISTRY } from '../../utils/nodeRegistry'
-import { getCustomClassesAsNodeCategory } from '../../utils/customCompositeRegistry'
+import { CUSTOM_CLASSES_CHANGED_EVENT, getCustomClassesAsNodeCategory } from '../../utils/customCompositeRegistry'
 import { NodeType } from '../../types/graph'
 import { normalizeNodeType } from '../../utils/nodeType'
 
@@ -104,7 +104,7 @@ export default function Sidebar() {
   const [activeTab, setActiveTab] = useState<'nodes' | 'templates'>('nodes')
   const [dragging, setDragging] = useState<string | null>(null)
   const [hoveredTemplate, setHoveredTemplate] = useState<string | null>(null)
-  const [customClasses] = useState<ReturnType<typeof getCustomClassesAsNodeCategory> | null>(null)
+  const [customClasses, setCustomClasses] = useState<ReturnType<typeof getCustomClassesAsNodeCategory>>(() => getCustomClassesAsNodeCategory())
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const features = useGraphStore((s) => s.features)
@@ -158,10 +158,33 @@ export default function Sidebar() {
     setCollapsedCategories(new Set(visibleCategories.map((c) => c.label)))
   }, [visibleCategories])
 
-  const onDragStart = useCallback((e: React.DragEvent, nodeType: NodeType, label: string, defaultParams: Record<string, number | string | boolean>) => {
-    e.dataTransfer.setData('application/flowhamster', JSON.stringify({ nodeType: normalizeNodeType(nodeType), label, defaultParams }))
+  useEffect(() => {
+    const refreshCustomClasses = () => setCustomClasses(getCustomClassesAsNodeCategory())
+    window.addEventListener(CUSTOM_CLASSES_CHANGED_EVENT, refreshCustomClasses)
+    window.addEventListener('storage', refreshCustomClasses)
+    return () => {
+      window.removeEventListener(CUSTOM_CLASSES_CHANGED_EVENT, refreshCustomClasses)
+      window.removeEventListener('storage', refreshCustomClasses)
+    }
+  }, [])
+
+  const filteredCustomClasses = (() => {
+    if (!searchQuery) return customClasses
+    const q = searchQuery.toLowerCase()
+    return {
+      ...customClasses,
+      nodes: customClasses.nodes.filter((n: any) =>
+        String(n.label).toLowerCase().includes(q) ||
+        String(n.displayLabel ?? '').toLowerCase().includes(q) ||
+        String(n.customClassId ?? '').toLowerCase().includes(q)
+      ),
+    }
+  })()
+
+  const onDragStart = useCallback((e: React.DragEvent, nodeType: NodeType, label: string, defaultParams: Record<string, number | string | boolean>, extra: Record<string, unknown> = {}) => {
+    e.dataTransfer.setData('application/flowhamster', JSON.stringify({ nodeType: normalizeNodeType(nodeType), label, defaultParams, ...extra }))
     e.dataTransfer.effectAllowed = 'move'
-    setDragging(normalizeNodeType(nodeType))
+    setDragging(String(extra.classId ?? normalizeNodeType(nodeType)))
   }, [])
 
   const onDragEnd = useCallback(() => setDragging(null), [])
@@ -272,8 +295,8 @@ export default function Sidebar() {
                       key={n.type}
                       style={{
                         ...nodeItemStyle,
-                        background: dragging === n.type ? '#1a2a3a' : 'transparent',
-                        borderColor: dragging === n.type ? '#4488ff44' : 'transparent',
+	                        background: dragging === n.type ? '#1a2a3a' : 'transparent',
+	                        borderColor: dragging === n.type ? '#4488ff44' : 'transparent',
                         paddingLeft: '16px',
                       }}
                       draggable
@@ -289,34 +312,39 @@ export default function Sidebar() {
             })}
 
             {/* Custom classes section */}
-            {customClasses && customClasses.nodes.length > 0 && (
-              <div key="custom">
-                <div style={{ ...categoryHeaderStyle, marginTop: '14px' }} onClick={() => toggleCategory('Custom')}>
-                  <span style={categoryStyle}>
-                    {collapsedCategories.has('Custom') ? '▶' : '▼'} Custom
-                  </span>
-                  <span style={{ fontSize: '9px', color: '#444' }}>
-                    {customClasses.nodes.length}
-                  </span>
-                </div>
-                {!collapsedCategories.has('Custom') && customClasses.nodes.map((n: any) => (
-                  <div
-                    key={n.type}
-                    style={{
-                      ...nodeItemStyle,
-                      background: dragging === n.type ? '#2a3a4a' : 'transparent',
-                      borderColor: dragging === n.type ? '#44aaff44' : 'transparent',
-                      paddingLeft: '16px',
-                    }}
-                    draggable
-                    onDragStart={(e) => onDragStart(e, n.type, n.label, n.defaultParams)}
-                    onDragEnd={onDragEnd}
-                    title={n.description}
-                  >
-                    {n.label}
-                  </div>
-                ))}
-              </div>
+	            {filteredCustomClasses.nodes.length > 0 && (
+	              <div key="custom">
+	                <div style={{ ...categoryHeaderStyle, marginTop: '14px' }} onClick={() => toggleCategory('Custom')}>
+	                  <span style={categoryStyle}>
+	                    {collapsedCategories.has('Custom') ? '▶' : '▼'} Custom
+	                  </span>
+	                  <span style={{ fontSize: '9px', color: '#444' }}>
+	                    {filteredCustomClasses.nodes.length}
+	                  </span>
+	                </div>
+	                {!collapsedCategories.has('Custom') && filteredCustomClasses.nodes.map((n: any) => (
+	                  <div
+	                    key={n.classId ?? n.id}
+	                    style={{
+	                      ...nodeItemStyle,
+	                      background: dragging === (n.classId ?? n.id) ? '#2a3a4a' : 'transparent',
+	                      borderColor: dragging === (n.classId ?? n.id) ? '#44aaff44' : 'transparent',
+	                      paddingLeft: '16px',
+	                    }}
+	                    draggable
+	                    onDragStart={(e) => onDragStart(e, n.type, n.label, n.defaultParams, {
+	                      classId: n.classId,
+	                      customClassRegistryId: n.classId,
+	                      customClassId: n.customClassId,
+	                      originClassId: n.originClassId,
+	                    })}
+	                    onDragEnd={onDragEnd}
+	                    title={n.description}
+	                  >
+	                    {n.displayLabel ?? n.label}
+	                  </div>
+	                ))}
+	              </div>
             )}
           </>
         ) : (
@@ -343,7 +371,7 @@ export default function Sidebar() {
                   {tpl.description}
                 </div>
               </div>
-            ))}
+            )))}
           </>
         )}
       </div>

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, WebSocket
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from backend.services.ast_core import generate
 import json
 
@@ -15,5 +15,7 @@ async def ws_code(ws: WebSocket):
             edges = payload.get("edges", [])
             code = generate({"nodes": nodes, "edges": edges})
             await ws.send_text(json.dumps({"code": code}))
+        except WebSocketDisconnect:
+            break
         except Exception as e:
             await ws.send_text(json.dumps({"error": str(e)}))

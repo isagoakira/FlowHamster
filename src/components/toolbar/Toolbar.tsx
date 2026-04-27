@@ -39,10 +39,14 @@ export function Toolbar() {
   const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds)
 
   // Package-related selectors (custom composites)
-  // canPackage = selectedNodes are all non-composite, count >= 2
+  // Collapsed custom instances can be nested into a new package; expanded package shells cannot.
   const canPackage = selectedNodeIds.length >= 2 && selectedNodeIds.every(id => {
     const node = nodes.find(n => n.id === id)
-    return !(node?.data as any)?.isCustomComposite
+    const data = node?.data as any
+    return Boolean(node) &&
+      node?.type !== 'group' &&
+      data?.nodeType !== 'group' &&
+      !(data?.isCustomComposite && data?.isExpanded)
   })
   const hasExpandedPackage = selectedNodeIds.some(id => {
     const node = nodes.find(n => n.id === id)

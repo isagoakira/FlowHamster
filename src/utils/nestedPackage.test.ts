@@ -11,18 +11,14 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import {
   packageNodes,
-  unpackageGroup,
   expandPackage,
-  collapsePackage,
   resetModuleCounter,
 } from './subgraphPackager'
 import {
   registerCustomClass,
   getAllCustomClasses,
-  getCustomClass,
-  unregisterCustomClass,
 } from './customCompositeRegistry'
-import { FlowHamsterNode, FlowHamsterEdge, CustomCompositeNodeData } from '../types/graph'
+import { FlowHamsterNode, FlowHamsterEdge } from '../types/graph'
 
 // Mock localStorage for jsdom environment
 const localStorageMock = (() => {
@@ -61,7 +57,7 @@ function createNode(id: string, type: string, label: string, position = { x: 0, 
 function createCustomCompositeNode(
   id: string,
   customClassId: string,
-  internalStructure: Array<{ id: string; type: string; label: string }>,
+  internalStructure: ReadonlyArray<{ id: string; type: string; label: string }>,
   position = { x: 0, y: 0 }
 ): FlowHamsterNode {
   return {
@@ -115,7 +111,7 @@ describe('nested GroupNode packaging', () => {
       const module1Internal = [
         { id: 'relu1', type: 'relu', label: 'ReLU1' },
         { id: 'linear1', type: 'linear', label: 'Linear1' },
-      ]
+      ] as const
 
       // Register Module_1
       registerCustomClass(
@@ -130,7 +126,6 @@ describe('nested GroupNode packaging', () => {
       )
 
       // Create a graph with Module_1 and an additional node
-      const module1Node = createCustomCompositeNode('module1_instance', 'Module_1', module1Internal, { x: 100, y: 100 })
       const otherNode = createNode('relu2', 'relu', 'ReLU2', { x: 300, y: 100 })
 
       // Step 2: Package Module_1 copy + otherNode into Module_2
@@ -170,7 +165,7 @@ describe('nested GroupNode packaging', () => {
       // Step 1: Register Module_1
       const module1Internal = [
         { id: 'relu1', type: 'relu', label: 'ReLU1' },
-      ]
+      ] as const
 
       registerCustomClass(
         'Module_1',
@@ -198,6 +193,7 @@ describe('nested GroupNode packaging', () => {
         ['module1_copy', 'relu2'],
         { x: 200, y: 100 }
       )
+      expect(module2Pkg.data.isCustomComposite).toBe(true)
 
       // Get all registered custom classes
       const allClasses = getAllCustomClasses()
@@ -240,7 +236,7 @@ describe('nested GroupNode packaging', () => {
       // Setup Module_1
       const module1Internal = [
         { id: 'relu1', type: 'relu', label: 'ReLU1' },
-      ]
+      ] as const
 
       registerCustomClass(
         'Module_1',
@@ -281,7 +277,9 @@ describe('nested GroupNode packaging', () => {
       expect((expandedModule2 as any).data.isExpanded).toBe(true)
 
       // The inner Module_1 copy should be visible
-      const innerModule1 = expanded.nodes.find(n => n.id === 'module1_copy')
+      const innerModule1 = expanded.nodes.find(
+        n => (n.data as any).customClassId === 'Module_1'
+      )
       expect(innerModule1).toBeDefined()
     })
   })
