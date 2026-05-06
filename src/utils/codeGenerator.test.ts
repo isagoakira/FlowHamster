@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { FlowHamsterEdge, FlowHamsterNode } from '../types/graph'
 import { LOCAL_TEMPLATES } from '../hooks/useTemplateStore'
 import { generateLocalCode } from './codeGenerator'
+import { WorkflowTrainingConfig } from '../schema/workflowDocument'
 
 function getTemplateGraph(templateId: string): { nodes: FlowHamsterNode[]; edges: FlowHamsterEdge[] } {
   const template = LOCAL_TEMPLATES.find((item) => item.id === templateId)
@@ -48,5 +49,208 @@ describe('codeGenerator', () => {
     expect(code).toContain('x_parameter_1 = self.x_parameter_1')
     expect(code).not.toMatch(/^\s*x_parameter_1 = nn\.Parameter\(/m)
     expect(code).toContain('x_add_1 = x_concat_1 + x_parameter_2')
+  })
+
+  describe('composite loss handling', () => {
+    it('should handle empty components array with fallback', () => {
+      // This tests BUG-003 fix: composite loss with empty components should use fallback
+      const nodes: FlowHamsterNode[] = [
+        {
+          id: 'input',
+          type: 'inputNode',
+          position: { x: 0, y: 0 },
+          data: { nodeType: 'input', label: 'Input', params: {} },
+        },
+        {
+          id: 'linear',
+          type: 'linearNode',
+          position: { x: 100, y: 0 },
+          data: { nodeType: 'linear', label: 'Linear', params: { in_features: 10, out_features: 10 } },
+        },
+      ]
+      const edges: FlowHamsterEdge[] = [
+        { id: 'e1', source: 'input', target: 'linear', sourceHandle: null, targetHandle: null },
+      ]
+
+      // Create a mock training config with empty components but fallback
+      const mockConfig: WorkflowTrainingConfig = {
+        taskType: 'classification',
+        loss: {
+          type: 'composite',
+          enabled: true,
+          params: {
+            components: [],  // Empty components - BUG-003 scenario
+            fallbackLoss: 'cross_entropy',
+          },
+        },
+        optimizer: {
+          type: 'adam',
+          enabled: true,
+          params: { lr: 0.001 },
+        },
+        scheduler: {
+          type: 'step',
+          enabled: false,
+          params: {},
+        },
+        metrics: [],
+        runtime: {
+          device: 'cuda',
+          epochs: 10,
+          batchSize: 32,
+          amp: false,
+          gradClip: null,
+          numWorkers: 4,
+        },
+        checkpoint: {
+          enabled: false,
+          saveTopK: 1,
+          monitor: 'val_loss',
+          mode: 'min',
+          earlyStopPatience: null,
+        },
+      }
+
+      // The generateLocalCode function takes nodes, edges, features?, trainingConfig?, workflowOptions?
+      const { code } = generateLocalCode(nodes, edges, undefined, mockConfig)
+
+      // Should fall back to cross_entropy when components is empty
+      expect(code).toContain('nn.CrossEntropyLoss()')
+      // Should NOT try to build composite loss expression with empty components
+      expect(code).not.toContain('loss_fn_0')
+    })
+
+    it('should handle multiple weighted loss components', () => {
+      const nodes: FlowHamsterNode[] = [
+        {
+          id: 'input',
+          type: 'inputNode',
+          position: { x: 0, y: 0 },
+          data: { nodeType: 'input', label: 'Input', params: {} },
+        },
+        {
+          id: 'linear',
+          type: 'linearNode',
+          position: { x: 100, y: 0 },
+          data: { nodeType: 'linear', label: 'Linear', params: { in_features: 10, out_features: 10 } },
+        },
+      ]
+      const edges: FlowHamsterEdge[] = [
+        { id: 'e1', source: 'input', target: 'linear', sourceHandle: null, targetHandle: null },
+      ]
+
+      const mockConfig: WorkflowTrainingConfig = {
+        taskType: 'segmentation',
+        loss: {
+          type: 'composite',
+          enabled: true,
+          params: {
+            components: [
+              { type: 'dice', weight: 0.3 },
+              { type: 'cross_entropy', weight: 0.7 },
+            ],
+          },
+        },
+        optimizer: {
+          type: 'adam',
+          enabled: true,
+          params: { lr: 0.001 },
+        },
+        scheduler: {
+          type: 'step',
+          enabled: false,
+          params: {},
+        },
+        metrics: [],
+        runtime: {
+          device: 'cuda',
+          epochs: 10,
+          batchSize: 32,
+          amp: false,
+          gradClip: null,
+          numWorkers: 4,
+        },
+        checkpoint: {
+          enabled: false,
+          saveTopK: 1,
+          monitor: 'val_loss',
+          mode: 'min',
+          earlyStopPatience: null,
+        },
+      }
+
+      const { code } = generateLocalCode(nodes, edges, undefined, mockConfig)
+
+      // Should have weighted sum expression
+      expect(code).toContain('0.3')
+      expect(code).toContain('0.7')
+      // Should emit both loss functions
+      expect(code).toContain('loss_fn_0')
+      expect(code).toContain('loss_fn_1')
+    })
+
+    it('should handle custom loss code in composite', () => {
+      const nodes: FlowHamsterNode[] = [
+        {
+          id: 'input',
+          type: 'inputNode',
+          position: { x: 0, y: 0 },
+          data: { nodeType: 'input', label: 'Input', params: {} },
+        },
+        {
+          id: 'linear',
+          type: 'linearNode',
+          position: { x: 100, y: 0 },
+          data: { nodeType: 'linear', label: 'Linear', params: { in_features: 10, out_features: 10 } },
+        },
+      ]
+      const edges: FlowHamsterEdge[] = [
+        { id: 'e1', source: 'input', target: 'linear', sourceHandle: null, targetHandle: null },
+      ]
+
+      const mockConfig: WorkflowTrainingConfig = {
+        taskType: 'custom',
+        loss: {
+          type: 'composite',
+          enabled: true,
+          params: {
+            components: [
+              { type: 'custom', weight: 1.0, customCode: 'def custom_loss_fn(pred, target):\n    return torch.nn.functional.mse_loss(pred, target)' },
+            ],
+          },
+        },
+        optimizer: {
+          type: 'adam',
+          enabled: true,
+          params: { lr: 0.001 },
+        },
+        scheduler: {
+          type: 'step',
+          enabled: false,
+          params: {},
+        },
+        metrics: [],
+        runtime: {
+          device: 'cuda',
+          epochs: 10,
+          batchSize: 32,
+          amp: false,
+          gradClip: null,
+          numWorkers: 4,
+        },
+        checkpoint: {
+          enabled: false,
+          saveTopK: 1,
+          monitor: 'val_loss',
+          mode: 'min',
+          earlyStopPatience: null,
+        },
+      }
+
+      const { code } = generateLocalCode(nodes, edges, undefined, mockConfig)
+
+      // Should emit the custom code
+      expect(code).toContain('def custom_loss_fn')
+    })
   })
 })

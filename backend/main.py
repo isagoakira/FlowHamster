@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from backend.routers import generate, execute, export, websocket, templates, workflows
+from backend.routers import generate, execute, export, websocket, templates, workflows, runs, ssh_train
 
 app = FastAPI(title="FlowHamster API", version="0.1.0")
 
@@ -28,6 +28,8 @@ app.include_router(export.router, prefix="/api")
 app.include_router(websocket.router)
 app.include_router(templates.router, prefix="/api")
 app.include_router(workflows.router, prefix="/api")
+app.include_router(runs.router, prefix="/api")
+app.include_router(ssh_train.router, prefix="/api")
 
 
 @app.get("/")

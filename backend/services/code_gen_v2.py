@@ -27,11 +27,11 @@ NODE_SIGNATURES: dict[str, dict] = {
 
     # ── 卷积 ──
     "conv2d": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.Conv2d",
-               "module_template": "nn.Conv2d(in_channels={in_channels}, out_channels={out_channels}, kernel_size={kernel_size}, stride={stride}, padding={padding}, bias={bias})"},
+               "module_template": "nn.Conv2d(in_channels={in_channels}, out_channels={out_channels}, kernel_size={kernel_size}{stride}{padding}{bias})"},
     "conv1d": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.Conv1d",
-               "module_template": "nn.Conv1d(in_channels={in_channels}, out_channels={out_channels}, kernel_size={kernel_size}, stride={stride}, padding={padding}, bias={bias})"},
+               "module_template": "nn.Conv1d(in_channels={in_channels}, out_channels={out_channels}, kernel_size={kernel_size}{stride}{padding}{bias})"},
     "conv3d": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.Conv3d",
-               "module_template": "nn.Conv3d(in_channels={in_channels}, out_channels={out_channels}, kernel_size={kernel_size}, stride={stride}, padding={padding}, bias={bias})"},
+               "module_template": "nn.Conv3d(in_channels={in_channels}, out_channels={out_channels}, kernel_size={kernel_size}{stride}{padding}{bias})"},
 
     # ── 线性 ──
     "linear": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.Linear",
@@ -303,11 +303,27 @@ class WorkflowCodeGenerator:
 
             counter[op] = counter.get(op, 0) + 1
             var_name = f"self.mod_{op}_{counter[op]}"
-            var_map[nid] = var_name
 
             try:
-                code_str = template.format(**{k: v for k, v in block.fields.items()})
+                # Build optional parameter suffixes only when they differ from defaults
+                fields = {k: v for k, v in block.fields.items()}
+                if fields.get("stride") not in (None, 1, "1"):
+                    fields["stride"] = f", stride={fields['stride']}"
+                else:
+                    fields["stride"] = ""
+                if fields.get("padding") not in (None, 0, "0", "None", ""):
+                    fields["padding"] = f", padding={fields['padding']}"
+                else:
+                    fields["padding"] = ""
+                if fields.get("bias") in (True, "True", "true", 1, "1"):
+                    fields["bias"] = ", bias=True"
+                elif fields.get("bias") in (False, "False", "false", 0, "0"):
+                    fields["bias"] = ", bias=False"
+                else:
+                    fields["bias"] = ""  # default True in PyTorch
+                code_str = template.format(**fields)
                 init_lines.append(f"        {var_name} = {code_str}")
+                var_map[nid] = var_name  # only register if init succeeded
             except Exception as e:
                 self.warnings.append(f"Module template error for {nid} ({op}): {e}")
 
@@ -365,6 +381,11 @@ class WorkflowCodeGenerator:
             line = self._generate_forward_line(block, op, in_vals, out_var, var_map)
             if line:
                 lines.append(f"        {line}")
+
+        # If forward body has lines but no explicit return, return the last output
+        if lines and not any("return" in l for l in lines):
+            last_output = outputs.get(exec_order[-1], "x")
+            lines.append(f"        return {last_output}")
 
         return lines
 
@@ -611,8 +632,6 @@ class Mamba(nn.Module):
 ''')
 
         if "mlp" in needed:
-
-        if "mlp" in needed:
             parts.append('''
 class MLP(nn.Module):
     """Multi-layer perceptron"""
@@ -693,12 +712,6 @@ class FlowHamsterModel(nn.Module):
 
     def forward(self, x):
 {forward_block}
-
-if __name__ == "__main__":
-    model = FlowHamsterModel()
-    x = torch.randn(1, {self._guess_input_channels()})
-    print(model)
-    print("Output shape:", model(x).shape)
 '''
 
     def _guess_input_channels(self) -> str:

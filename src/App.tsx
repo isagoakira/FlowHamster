@@ -3,6 +3,7 @@ import Sidebar from './components/sidebar/Sidebar'
 import CodePreview from './components/codePreview/CodePreview'
 import Toolbar from './components/toolbar/Toolbar'
 import WorkflowSettingsBar from './components/WorkflowSettingsBar'
+import ErrorBoundary from './components/common/ErrorBoundary'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { useGraphStore } from './hooks/useGraphStore'
 import DataSidebar from './components/data/DataSidebar'
@@ -30,11 +31,17 @@ export default function App() {
     <div style={appStyle}>
       <Toolbar />
       <div style={bodyStyle}>
-        {workspaceMode === 'model' ? <Sidebar /> : <DataSidebar />}
+        <ErrorBoundary level="section">
+          {workspaceMode === 'model' ? <Sidebar /> : <DataSidebar />}
+        </ErrorBoundary>
         <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
-          {workspaceMode === 'model' ? <Canvas /> : <DataCanvas />}
+          <ErrorBoundary level="section">
+            {workspaceMode === 'model' ? <Canvas /> : <DataCanvas />}
+          </ErrorBoundary>
         </div>
-        {workspaceMode === 'model' ? <CodePreview /> : <DataPreview />}
+        <ErrorBoundary level="section">
+          {workspaceMode === 'model' ? <CodePreview /> : <DataPreview />}
+        </ErrorBoundary>
       </div>
       {workspaceMode === 'model' && <WorkflowSettingsBar />}
     </div>

@@ -38,10 +38,12 @@ function getSourceNodeId(input: string | string[] | null | undefined): string | 
 }
 
 function normalizeNameToken(value: string): string {
-  return safeId(value)
+  const result = safeId(value)
     .replace(/^_+|_+$/g, '')
     .replace(/__+/g, '_')
     .toLowerCase()
+  // Ensure non-empty result for valid variable names
+  return result || 'unnamed'
 }
 
 function getBlockNameToken(block: NodeBlock): string {

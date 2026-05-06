@@ -1,11 +1,180 @@
+# =============================================
+# FlowHamster - 完整的 .gitignore
+# =============================================
+
+# =============================================
+# 依赖目录
+# =============================================
 node_modules/
-.venv*/
-*.venv*
+.npm/
+.yarn/
+pnpm-store/
+
+# Python 虚拟环境
+.venv/
+venv/
+env/
+*.venv
+ENV/
+
+# Rust / Cargo (Tauri)
+src-tauri/target/
+src-tauri/Cargo.lock  # 锁定文件可能包含本地路径
+
+# =============================================
+# 构建产物
+# =============================================
+dist/
+dist-ssr/
+build/
+*.tsbuildinfo
+
+# Tauri
+src-tauri/release/
+src-tauri/.tauriignore
+
+# Python 编译缓存
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# =============================================
+# IDE / 编辑器
+# =============================================
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.log
+
+# =============================================
+# 环境变量 / 密钥 / 隐私
+# =============================================
+.env
+.env.*
+.env.local
+.secrets/
+*.pem
+*.key
+credentials.json
+service_account.json
+
+# SSH
+*.ssh/
+config
+
+# 数据库
+*.db
+*.sqlite
+*.sqlite3
+runs/
+
+# =============================================
+# Claude Code 特定
+# =============================================
+.claude/
+.claude/vcs/snapshots/
+.slara/
+
+# =============================================
+# 备份 / 临时文件
+# =============================================
+*.backup
+*.backup_*/
 backups/
 *.tar.gz
-*.backup_*/
-dist-test/
-.DS_Store
-.claude/
+*.zip
+*.7z
+*.rar
+*~
+
+# 临时文件
+*.tmp
+*.temp
+.cache/
+tmp/
+temp/
+
+# 测试覆盖率
+coverage/
+.coverage
+htmlcov/
+
+# =============================================
+# 工作流数据 (本地 IndexedDB/blob 存储)
+# =============================================
+workflows/*/cache/
+*.workflow.cache
+graph-cache/
+
+# =============================================
+# 用户特定的运行时数据
+# =============================================
+*.runs.db
+*.runs/
+.checkpoints/
+*.ckpt
+*.pt
+*.pth
+*.onnx
+
+# 日志
+*.log
+logs/
+
+# =============================================
+# Prompt / 草稿 / 文档类个人文件
+# =============================================
+*.prompt
+*.md.bak
+*_draft*
+*_draft/
+*note*
+*_note*
+
+# 项目根目录的 prompt/文档类
+/dev-plan.md
+/main-log.md
+/lessons-learned.md
+/ARCHITECTURE_IMPROVEMENT.md
+/OPTIMIZATION_PLAN.md
+/INTERNALSTRUCTURE_REFINEMENT_PLAN.md
+/OPC项目计划书_*.docx
+/TODAY_*.md
+
+# =============================================
+# Node 包管理器锁文件 (可选)
+# 取消注释如果想锁定前端依赖
+# =============================================
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# =============================================
+# 测试输出 (保留测试本身，忽略运行结果)
+# =============================================
+test-results/
+playwright-report/
+playwright/.cache/
+
+# =============================================
+# 开发/调试生成的文件
+# =============================================
+*.codesandbox/
+codesandbox.cache/
+
+# Vite dev server 指纹
+.vite/
+
+# ESLint
+.eslintcache

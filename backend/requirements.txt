@@ -7,3 +7,4 @@ nbformat==5.10.4
 nbconvert==7.17.0
 torch==2.3.0
 einops==0.8.0
+paramiko>=3.4.0

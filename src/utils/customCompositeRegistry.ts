@@ -41,17 +41,24 @@ function readToHandle(edge: RegistrableInternalEdge): string | undefined {
   return 'toHandle' in edge ? edge.toHandle : (edge as InternalEdge).toPort
 }
 
-// Convert SubModule[] to SubModuleData[]
+// Convert SubModule[] to SubModuleData[] with deep cloning
 function toSubModuleData(structure: RegistrableSubModule[]): SubModuleData[] {
-  return structure.map(s => ({
-    id: s.id,
-    type: s.type,
-    label: s.label,
-    params: { ...s.params },
-    position: 'position' in s ? s.position : undefined,
-    customClassId: 'customClassId' in s ? s.customClassId : undefined,
-    data: 'data' in s ? s.data : undefined,
-  }))
+  return structure.map(s => {
+    // Deep clone data field to avoid shared references (F3 fix)
+    const clonedData = 'data' in s && s.data
+      ? JSON.parse(JSON.stringify(s.data))
+      : undefined
+
+    return {
+      id: s.id,
+      type: s.type,
+      label: s.label,
+      params: { ...s.params },
+      position: 'position' in s ? s.position : undefined,
+      customClassId: 'customClassId' in s ? s.customClassId : undefined,
+      data: clonedData,
+    }
+  })
 }
 
 // Convert InternalEdge[] to InternalEdgeData[]

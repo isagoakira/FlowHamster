@@ -567,20 +567,31 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
     case 'folder_source': {
       const path = pythonValue(params.path || './data/images')
       const pattern = pythonValue(params.pattern || '*.jpg')
+      const recursive = params.recursive === true
       const id = safeToken(node.id)
+      if (recursive) {
+        result.initCode.push(
+          `        self._${id}_paths = sorted(Path(${path}).rglob(${pattern}))`
+        )
+      } else {
+        result.initCode.push(
+          `        self._${id}_paths = sorted(Path(${path}).glob(${pattern}))`
+        )
+      }
       result.initCode.push(
-        `        self._${id}_paths = sorted(Path(${path}).glob(${pattern}))`,
         `        self._${id}_cache = {}`
       )
       result.getitemCode.push(
-        `        # Folder Source: ${path}`,
+        `        # Folder Source: ${path} (recursive=${recursive})`,
         `        img_path = self._${id}_paths[index % len(self._${id}_paths)]`,
         `        img_tensor = torchvision.io.read_image(str(img_path)).float() / 255.0`,
         `        _field_image = img_tensor`,
-        `        _field_path = str(img_path)`
+        `        _field_path = str(img_path)`,
+        `        _field_filename = img_path.name`
       )
       result.fieldTracking['image'] = '_field_image'
       result.fieldTracking['path'] = '_field_path'
+      result.fieldTracking['filename'] = '_field_filename'
       break
     }
 
@@ -590,16 +601,28 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
       const id = safeToken(node.id)
       result.initCode.push(
         `        self._${id}_df = pd.read_csv(${path}, delimiter=${delimiter})`,
+        `        self._${id}_columns = list(self._${id}_df.columns)`,
         `        self._${id}_cache = {}`
       )
       result.getitemCode.push(
         `        # CSV Source: ${path}`,
         `        row = self._${id}_df.iloc[index % len(self._${id}_df)]`,
-        `        _field_label = int(row.get('label', 0))`,
-        `        _field_data = row.to_dict()`
+        `        for col in self._${id}_columns:`,
+        `            val = row[col]`,
+        `            if pd.isna(val): continue`,
+        `            # Try to convert to tensor if numeric`,
+        `            try:`,
+        `                numeric_val = float(val)`,
+        `                if col.lower() in ('label', 'class', 'target'):`,
+        `                    _field_label = int(numeric_val)`,
+        `                else:`,
+        `                    locals()[f'_field_{col}'] = torch.tensor(numeric_val) if abs(numeric_val - int(numeric_val)) < 1e-9 else torch.tensor(float(val))`,
+        `            except:`,
+        `                locals()[f'_field_{col}'] = str(val)`,
+        `            _field_names.append(f'_field_{col}')`
       )
       result.fieldTracking['label'] = '_field_label'
-      result.fieldTracking['data'] = '_field_data'
+      result.fieldTracking['csv_row'] = '_field_data'
       break
     }
 
@@ -626,15 +649,26 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
       const id = safeToken(node.id)
       result.initCode.push(
         `        self._${id}_df = pd.read_parquet(${path})`,
+        `        self._${id}_columns = list(self._${id}_df.columns)`,
         `        self._${id}_cache = {}`
       )
       result.getitemCode.push(
         `        # Parquet Source: ${path}`,
         `        row = self._${id}_df.iloc[index % len(self._${id}_df)]`,
-        `        for col, val in row.items():`,
-        `            locals()[f'_field_{col}'] = val`,
+        `        for col in self._${id}_columns:`,
+        `            val = row[col]`,
+        `            if pd.isna(val): continue`,
+        `            try:`,
+        `                numeric_val = float(val)`,
+        `                if col.lower() in ('label', 'class', 'target'):`,
+        `                    _field_label = int(numeric_val)`,
+        `                else:`,
+        `                    locals()[f'_field_{col}'] = torch.tensor(numeric_val) if abs(numeric_val - int(numeric_val)) < 1e-9 else torch.tensor(float(val))`,
+        `            except:`,
+        `                locals()[f'_field_{col}'] = str(val)`,
         `            _field_names.append(f'_field_{col}')`
       )
+      result.fieldTracking['label'] = '_field_label'
       break
     }
 
@@ -1387,17 +1421,51 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
     // === Batch ===
     case 'batch': {
       const batchSize = Number(params.batch_size || 32)
+      const dropLast = params.drop_last === true
       result.getitemCode.push(
-        `        # Batch (batch_size=${batchSize}) - handled by DataLoader`
+        `        # Batch (batch_size=${batchSize}, drop_last=${dropLast}) - batch dimension handled by DataLoader collate`
       )
+      // batch node marks that data is ready for batching - no direct field output
+      // but signals that output will be batched tensors
+      result.fieldTracking['batch_idx'] = 'index'  // track batch position
       break
     }
 
     case 'collate': {
       const strategy = String(params.strategy || 'default')
       result.getitemCode.push(
-        `        # Collate (strategy=${strategy}) - handled by DataLoader collate_fn`
+        `        # Collate (strategy=${strategy}) - custom collate_fn generated at DataLoader level`
       )
+      // Generate collate function based on strategy
+      if (strategy === 'default') {
+        result.initCode.push(
+          `        self._collate_fn_${safeToken(node.id)} = torch.utils.data.default_collate`
+        )
+      } else if (strategy === 'pad') {
+        result.initCode.push(
+          `        def _pad_collate_${safeToken(node.id)}(batch):`,
+          `            # Pad sequences to same length`,
+          `            max_len = max(item['input_ids'].shape[0] for item in batch if 'input_ids' in item)`,
+          `            result = []`,
+          `            for item in batch:`,
+          `                padded = item.copy()`,
+          `                for k, v in item.items():`,
+          `                    if torch.is_tensor(v) and v.dim() == 1 and v.shape[0] < max_len:`,
+          `                        padded[k] = torch.nn.functional.pad(v, (0, max_len - v.shape[0]))`,
+          `                result.append(padded)`,
+          `            return torch.utils.data.default_collate(result)`,
+          `        self._collate_fn_${safeToken(node.id)} = _pad_collate_${safeToken(node.id)}`
+        )
+      } else if (strategy === 'image') {
+        result.initCode.push(
+          `        def _image_collate_${safeToken(node.id)}(batch):`,
+          `            # Collate with image stacking`,
+          `            images = torch.stack([item['image'] for item in batch])`,
+          `            labels = torch.tensor([item['label'] for item in batch])`,
+          `            return {'image': images, 'label': labels}`,
+          `        self._collate_fn_${safeToken(node.id)} = _image_collate_${safeToken(node.id)}`
+        )
+      }
       break
     }
 
@@ -1407,9 +1475,20 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
       const numWorkers = Number(params.num_workers || 4)
       const pinMemory = params.pin_memory !== false
       result.getitemCode.push(
-        `        # DataLoader (batch_size=${batchSize}, shuffle=${shuffle}, num_workers=${numWorkers}, pin_memory=${pinMemory})`,
-        `        # Note: DataLoader is created outside the Dataset class`
+        `        # DataLoader (batch_size=${batchSize}, shuffle=${shuffle}, num_workers=${numWorkers}, pin_memory=${pinMemory})`
       )
+      // DataLoader node stores config for external DataLoader creation
+      result.initCode.push(
+        `        self._dataloader_config_${safeToken(node.id)} = {`,
+        `            'batch_size': ${batchSize},`,
+        `            'shuffle': ${shuffle},`,
+        `            'num_workers': ${numWorkers},`,
+        `            'pin_memory': ${pinMemory},`,
+        `            'drop_last': ${params.drop_last ?? false}`,
+        `        }`
+      )
+      // Track dataloader output type
+      result.fieldTracking['dataloader'] = '_dataloader'
       break
     }
 

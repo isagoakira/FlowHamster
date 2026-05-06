@@ -9,7 +9,7 @@ import {
 import { getNodeComponentType, normalizeNodeData } from '../utils/nodeType'
 import { validateTemplateWithMessages } from '../utils/templateValidator'
 import { adaptBackendTemplate } from '../utils/adapters/templateAdapter'
-import { packageNodes, expandPackage, collapsePackage, fullyUnpackageGroup } from '../utils/subgraphPackager'
+import { packageNodes, expandPackage, collapsePackage, fullyUnpackageGroup, deepRemapNodeIds, deepRemapInternalEdges } from '../utils/subgraphPackager'
 import { registerCustomClass, updateCustomClass, unregisterCustomClass, getAllCustomClasses, getCustomClass } from '../utils/customCompositeRegistry'
 import { WorkflowBinding, WorkflowTrainingConfig } from '../schema/workflowDocument'
 import { createDefaultTrainingConfig } from '../utils/workflowDocument'
@@ -171,7 +171,7 @@ function materializeCustomClassNodeData(data: NodeData): NodeData {
     isCustomComposite: true,
     customClassId: customClass.name,
     customClassRegistryId: customClass.id,
-    originClassId: customClass.originClassId ?? customClass.id,
+    originClassId: customClass.originClassId ?? customClass.id ?? className,
     isExpanded: false,
     internalStructure: cloneData(customClass.internalStructure),
     internalEdges: cloneData(customClass.internalEdges),
@@ -238,7 +238,8 @@ interface GraphState {
   packageViewerOpen: boolean
   packageViewerData: CustomCompositeNodeData | null
   packageViewerNodeId: string | null
-  openPackageViewer: (nodeId: string) => void
+  packageViewerMode: 'view' | 'edit'
+  openPackageViewer: (nodeId: string, mode?: 'view' | 'edit') => void
   closePackageViewer: () => void
   // Undo/Redo
   _history: HistoryState[]
@@ -281,6 +282,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   packageViewerOpen: false,
   packageViewerData: null,
   packageViewerNodeId: null,
+  packageViewerMode: 'view',
 
   registerRfSetters: (setNodes, setEdges) => set({ rfSetNodes: setNodes, rfSetEdges: setEdges }),
 
@@ -298,13 +300,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   setWorkspaceMode: (workspaceMode) => set({ workspaceMode }),
 
-  openPackageViewer: (nodeId) => {
+  openPackageViewer: (nodeId, mode = 'view') => {
     const node = get().nodes.find((n) => n.id === nodeId)
     if (node && (node.data as CustomCompositeNodeData)?.isCustomComposite) {
       set({
         packageViewerOpen: true,
         packageViewerData: node.data as CustomCompositeNodeData,
         packageViewerNodeId: nodeId,
+        packageViewerMode: mode,
       })
     }
   },
@@ -314,6 +317,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
       packageViewerOpen: false,
       packageViewerData: null,
       packageViewerNodeId: null,
+      packageViewerMode: 'view',
     })
   },
 
@@ -962,6 +966,14 @@ export const useGraphStore = create<GraphState>((set, get) => ({
         selected: true,
         data: {
           ...node.data,
+          // Deep remap nested internalStructure (F2 fix)
+          internalStructure: Array.isArray(node.data.internalStructure)
+            ? deepRemapNodeIds(node.data.internalStructure, nodeIdMap)
+            : node.data.internalStructure,
+          // Deep remap nested internalEdges (F2 fix)
+          internalEdges: Array.isArray(node.data.internalEdges)
+            ? deepRemapInternalEdges(node.data.internalEdges, nodeIdMap)
+            : node.data.internalEdges,
           childNodeIds: Array.isArray(node.data.childNodeIds)
             ? node.data.childNodeIds.map((childId) => nodeIdMap.get(childId) ?? childId)
             : node.data.childNodeIds,

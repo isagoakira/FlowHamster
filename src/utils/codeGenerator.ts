@@ -149,7 +149,7 @@ function getLossSetupCode(lossType: string): string[] {
         '    intersection = gts - gt_sorted.float().cumsum(0)',
         '    union = gts + (1 - gt_sorted).float().cumsum(0)',
         '    jaccard = 1. - intersection / union',
-        '    if len(googles) > 1:',
+        '    if len(jaccard) > 1:',
         '        jaccard[1:] = jaccard[1:] - jaccard[:-1]',
         '    return jaccard',
         'class LovaszLoss(nn.Module):',
@@ -296,9 +296,18 @@ function genTrainingConfigCode(config: WorkflowTrainingConfig): { setupLines: st
     : config.loss.type
 
   // Handle composite loss
-  if (config.loss.type === 'composite' && Array.isArray(config.loss.params?.components) && config.loss.params.components.length > 0) {
+  if (config.loss.type === 'composite') {
+    const components = config.loss.params?.components
+    if (!Array.isArray(components) || components.length === 0) {
+      // Fall back to single loss or default
+      if (config.loss.params?.fallbackLoss) {
+        const fallbackClass = getLossClass(String(config.loss.params.fallbackLoss))
+        setupLines.push(`    # Composite loss has no components, using fallback`)
+        setupLines.push(`    loss_fn = ${fallbackClass}`)
+      }
+      // Skip composite handling, will fall through to single loss
+    } else {
     setupLines.push('    # Composite loss function')
-    const components = config.loss.params.components as Array<{ type: string; weight: number; customCode?: string }>
     const needsSetupCode = new Set<string>()
 
     for (let i = 0; i < components.length; i++) {
@@ -327,7 +336,7 @@ function genTrainingConfigCode(config: WorkflowTrainingConfig): { setupLines: st
     // Build weighted sum expression
     const lossExprs = components.map((comp, i) => {
       if (comp.type === 'custom' && comp.customCode) {
-        return `${comp.weight} * loss_fn`
+        return `${comp.weight} * custom_loss_fn_${i}(primary_output, target)`
       }
       return `${comp.weight} * loss_fn_${i}(primary_output, target)`
     })
@@ -335,6 +344,7 @@ function genTrainingConfigCode(config: WorkflowTrainingConfig): { setupLines: st
     trainLines.push('    if target is None:')
     trainLines.push('        target = torch.randint(0, max(2, primary_output.shape[-1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)')
     trainLines.push(`    loss = ${lossExprs.join(' + ')}`)
+    }
   }
   // Handle single custom loss
   else if (actualLossType === 'custom' && config.loss.params?.code) {
@@ -505,21 +515,44 @@ export function generateLocalCode(
     }
   }
 
-  const executableGraph = getExecutableGraph(nodes, edges)
-  const dataWorkflow = compileDataWorkflow(
-    nodes,
-    workflowOptions?.dataGraphNodes ?? [],
-    workflowOptions?.dataGraphEdges ?? [],
-    workflowOptions?.bindings ?? [],
-    trainingConfig
-  )
+  let executableGraph
+  try {
+    executableGraph = getExecutableGraph(nodes, edges)
+  } catch (error) {
+    console.error('[codeGenerator] getExecutableGraph failed:', error)
+    return {
+      code: `# Code generation failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      branchAssignments: {},
+    }
+  }
+
+  let dataWorkflow
+  try {
+    dataWorkflow = compileDataWorkflow(
+      nodes,
+      workflowOptions?.dataGraphNodes ?? [],
+      workflowOptions?.dataGraphEdges ?? [],
+      workflowOptions?.bindings ?? [],
+      trainingConfig
+    )
+  } catch (error) {
+    console.warn('[codeGenerator] dataWorkflow compilation failed, using empty workflow:', error)
+    dataWorkflow = { hasWorkflowRuntime: false, warnings: [], pythonScaffold: '' }
+  }
 
   // Build AST from graph
-  const { blocks, branchAssignments, outputBlocks } = buildAST(
-    executableGraph.nodes,
-    executableGraph.edges,
-    features
-  )
+  let astResult
+  try {
+    astResult = buildAST(executableGraph.nodes, executableGraph.edges, features)
+  } catch (error) {
+    console.error('[codeGenerator] buildAST failed:', error)
+    return {
+      code: `# AST construction failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      branchAssignments: {},
+    }
+  }
+
+  const { blocks, branchAssignments, outputBlocks } = astResult
 
   // Filter blocks by category
   const modelBlocks = blocks.filter(b => !['training', 'evaluation'].includes(b.category))

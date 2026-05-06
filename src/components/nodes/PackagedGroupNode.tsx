@@ -75,6 +75,12 @@ const PackagedGroupNode = memo(({ data, id }: PackagedGroupNodeProps) => {
     setShowMenu(false)
   }, [id, data.customClassId, renamePackageClass])
 
+  const handleEditClass = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    openPackageViewer(id, 'edit')
+    setShowMenu(false)
+  }, [id, openPackageViewer])
+
   // 主容器样式
   const containerStyle: React.CSSProperties = {
     width: '100%',
@@ -309,6 +315,26 @@ const PackagedGroupNode = memo(({ data, id }: PackagedGroupNodeProps) => {
                 }}
               >
                 🏷️ 重命名类
+              </button>
+              <div style={{ height: 4 }} />
+              <button
+                onClick={handleEditClass}
+                style={{
+                  width: '100%',
+                  padding: '8px 12px',
+                  background: '#1a2a2e',
+                  border: '1px solid #2d4a4d',
+                  borderRadius: 6,
+                  color: '#f97316',
+                  fontSize: 11,
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                }}
+              >
+                ✏️ 编辑类定义
               </button>
               <div style={{ height: 4 }} />
               <button

@@ -112,15 +112,16 @@ function getVisibleGroupChildIds(
   )
 }
 
-function findBoundaryMapping(
+// === Boundary Edge Mapping (Deterministic, no fallback) ===
+
+/**
+ * Lookup by original edge ID (for restoring exact edges during unpackage).
+ */
+export function findBoundaryMappingByOriginalEdgeId(
   boundaryEdges: BoundaryEdgeData[],
-  direction: 'input' | 'output',
-  edge: FlowHamsterEdge
+  originalEdgeId: string
 ): BoundaryEdgeData | undefined {
-  const groupHandleId = direction === 'input' ? edge.targetHandle : edge.sourceHandle
-  return boundaryEdges.find((be) => be.direction === direction && be.originalEdgeId === edge.id) ??
-    boundaryEdges.find((be) => be.direction === direction && be.groupHandleId === groupHandleId) ??
-    boundaryEdges.find((be) => be.direction === direction)
+  return boundaryEdges.find((be) => be.originalEdgeId === originalEdgeId)
 }
 
 function restoreCurrentBoundaryEdges(
@@ -129,34 +130,120 @@ function restoreCurrentBoundaryEdges(
   boundaryEdges: BoundaryEdgeData[] | undefined,
   idMap: Map<string, string>
 ): FlowHamsterEdge[] {
-  const mappings = boundaryEdges ?? []
+  if (!boundaryEdges || boundaryEdges.length === 0) return []
+
   const restored: FlowHamsterEdge[] = []
+  // Track used boundary edges so each one maps to exactly one external edge.
+  // This prevents two external edges that share the same handle from both
+  // resolving to the same internal node (a silent data-loss bug).
+  const usedBoundaryEdges = new Set<string>()
 
   for (const edge of allEdges) {
     if (edge.target === groupId) {
-      const mapping = findBoundaryMapping(mappings, 'input', edge)
+      // INPUT edge: external source -> group
+      // 1. Exact edge ID match (stable, preferred)
+      let mapping = boundaryEdges.find(
+        (be) => be.direction === 'input' && be.originalEdgeId === edge.id && !usedBoundaryEdges.has(be.originalEdgeId)
+      )
+      // 2. Handle-based match using the ACTUAL edge targetHandle
+      if (!mapping && edge.targetHandle) {
+        mapping = boundaryEdges.find(
+          (be) => be.direction === 'input' && be.groupHandleId === edge.targetHandle && !usedBoundaryEdges.has(be.originalEdgeId)
+        )
+      }
+      // 3. Last resort: pick first unused input boundary edge
+      if (!mapping) {
+        mapping = boundaryEdges.find((be) => be.direction === 'input' && !usedBoundaryEdges.has(be.originalEdgeId))
+      }
       if (!mapping) continue
+
+      usedBoundaryEdges.add(mapping.originalEdgeId)
+      const internalNodeId = idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId
+      const targetHandle = mapping.internalHandle !== 'default'
+        ? mapping.internalHandle
+        : null
+
       restored.push({
         id: edge.id,
         source: edge.source,
-        target: idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId,
+        target: internalNodeId,
         sourceHandle: edge.sourceHandle,
-        targetHandle: mapping.targetHandle ?? (mapping.internalHandle !== 'default' ? mapping.internalHandle : null),
+        targetHandle,
       })
     } else if (edge.source === groupId) {
-      const mapping = findBoundaryMapping(mappings, 'output', edge)
+      // OUTPUT edge: group -> external target
+      // 1. Exact edge ID match (stable, preferred)
+      let mapping = boundaryEdges.find(
+        (be) => be.direction === 'output' && be.originalEdgeId === edge.id && !usedBoundaryEdges.has(be.originalEdgeId)
+      )
+      // 2. Handle-based match using the ACTUAL edge sourceHandle
+      if (!mapping && edge.sourceHandle) {
+        mapping = boundaryEdges.find(
+          (be) => be.direction === 'output' && be.groupHandleId === edge.sourceHandle && !usedBoundaryEdges.has(be.originalEdgeId)
+        )
+      }
+      // 3. Last resort: pick first unused output boundary edge
+      if (!mapping) {
+        mapping = boundaryEdges.find((be) => be.direction === 'output' && !usedBoundaryEdges.has(be.originalEdgeId))
+      }
       if (!mapping) continue
+
+      usedBoundaryEdges.add(mapping.originalEdgeId)
+      const internalNodeId = idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId
+      const sourceHandle = mapping.internalHandle !== 'default'
+        ? mapping.internalHandle
+        : null
+
       restored.push({
         id: edge.id,
-        source: idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId,
+        source: internalNodeId,
         target: edge.target,
-        sourceHandle: mapping.sourceHandle ?? (mapping.internalHandle !== 'default' ? mapping.internalHandle : null),
+        sourceHandle,
         targetHandle: edge.targetHandle,
       })
     }
   }
 
   return restored
+}
+
+// === Deep ID Remapping (for paste with nested packages) ===
+
+/**
+ * Recursively remaps all IDs in a SubModuleData array.
+ * Handles nested custom composites inside internalStructure.
+ */
+export function deepRemapNodeIds(
+  structure: SubModuleData[],
+  nodeIdMap: Map<string, string>
+): SubModuleData[] {
+  return structure.map((sub) => {
+    const remappedId = nodeIdMap.get(sub.id) ?? sub.id
+
+    const remappedInternalStructure = sub.data?.internalStructure
+      ? deepRemapNodeIds(sub.data.internalStructure as SubModuleData[], nodeIdMap)
+      : undefined
+
+    return {
+      ...sub,
+      id: remappedId,
+      data: sub.data ? { ...sub.data, internalStructure: remappedInternalStructure } : undefined,
+    }
+  })
+}
+
+/**
+ * Recursively remaps all from/to IDs in an InternalEdgeData array.
+ */
+export function deepRemapInternalEdges(
+  edges: InternalEdgeData[],
+  nodeIdMap: Map<string, string>
+): InternalEdgeData[] {
+  return edges.map((edge) => ({
+    ...edge,
+    from: nodeIdMap.get(edge.from) ?? edge.from,
+    to: nodeIdMap.get(edge.to) ?? edge.to,
+  }))
 }
 
 // Kept only for backwards-compatible tests; names are now derived from the
@@ -223,59 +310,57 @@ function inferBoundaryInfo(
   const outputPorts: GroupPort[] = []
   const boundaryEdges: BoundaryEdgeData[] = []
 
-  // 用于去重 - 同一个 handle 只取第一个 edge
-  const seenInputs = new Set<string>()
-  const seenOutputs = new Set<string>()
-
   for (const edge of edges) {
     const isInput = !nodeIds.has(edge.source) && nodeIds.has(edge.target)
     const isOutput = nodeIds.has(edge.source) && !nodeIds.has(edge.target)
 
     if (isInput) {
-      const key = `${edge.target}-${edge.targetHandle || 'default'}`
-      let groupHandleId = inputPorts.find((port) => port.nodeId === edge.target && port.label === (edge.targetHandle || 'input'))?.handleId
-      if (!seenInputs.has(key)) {
-        seenInputs.add(key)
-        groupHandleId = `input_${inputPorts.length}`
+      // Use the actual edge's targetHandle as the group handle ID
+      // This ensures restoreCurrentBoundaryEdges can match by handle
+      const actualHandle = edge.targetHandle || 'input'
+      let existingPort = inputPorts.find((port) => port.nodeId === edge.target && port.label === actualHandle)
+      if (!existingPort) {
+        const groupHandleId = `input_${inputPorts.length}`
         inputPorts.push({
           id: groupHandleId,
-          handleId: groupHandleId,
-          label: edge.targetHandle || 'input',
+          handleId: actualHandle,  // store actual handle as handleId
+          label: actualHandle,
           nodeId: edge.target,
           edgeId: edge.id,
         })
+        existingPort = inputPorts[inputPorts.length - 1]
       }
       boundaryEdges.push({
         originalEdgeId: edge.id,
         direction: 'input',
         internalNodeId: edge.target,
         internalHandle: edge.targetHandle || 'default',
-        groupHandleId: groupHandleId || 'input_0',
+        groupHandleId: existingPort.handleId,
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle,
         targetHandle: edge.targetHandle,
       })
     } else if (isOutput) {
-      const key = `${edge.source}-${edge.sourceHandle || 'default'}`
-      let groupHandleId = outputPorts.find((port) => port.nodeId === edge.source && port.label === (edge.sourceHandle || 'output'))?.handleId
-      if (!seenOutputs.has(key)) {
-        seenOutputs.add(key)
-        groupHandleId = `output_${outputPorts.length}`
+      const actualHandle = edge.sourceHandle || 'output'
+      let existingPort = outputPorts.find((port) => port.nodeId === edge.source && port.label === actualHandle)
+      if (!existingPort) {
+        const groupHandleId = `output_${outputPorts.length}`
         outputPorts.push({
           id: groupHandleId,
-          handleId: groupHandleId,
-          label: edge.sourceHandle || 'output',
+          handleId: actualHandle,
+          label: actualHandle,
           nodeId: edge.source,
           edgeId: edge.id,
         })
+        existingPort = outputPorts[outputPorts.length - 1]
       }
       boundaryEdges.push({
         originalEdgeId: edge.id,
         direction: 'output',
         internalNodeId: edge.source,
         internalHandle: edge.sourceHandle || 'default',
-        groupHandleId: groupHandleId || 'output_0',
+        groupHandleId: existingPort.handleId,
         source: edge.source,
         target: edge.target,
         sourceHandle: edge.sourceHandle,
@@ -455,6 +540,15 @@ export function expandPackage(
     return { nodes: allNodes, edges: allEdges }
   }
 
+  // F4: Validate before expand
+  const validation = preExpandValidation(groupNode, allNodes, allEdges)
+  if (!validation.isValid) {
+    console.error('[subgraphPackager] Pre-expand validation failed:', validation.errors)
+  }
+  for (const w of validation.warnings) {
+    console.warn('[subgraphPackager] Pre-expand validation warning:', w.message)
+  }
+
   const data = groupNode.data as CustomCompositeNodeData
   const { internalStructure, internalEdges: storedEdges, boundaryEdges } = data
 
@@ -582,6 +676,13 @@ export function fullyUnpackageGroup(
     return { nodes: allNodes, edges: allEdges }
   }
 
+  // F4: Validate before unpackage
+  const validation = preExpandValidation(groupNode, allNodes, allEdges)
+  if (!validation.isValid) {
+    console.error('[subgraphPackager] Pre-unpackage validation failed:', validation.errors)
+    return { nodes: allNodes, edges: allEdges }
+  }
+
   const data = groupNode.data as CustomCompositeNodeData
   const { internalStructure, internalEdges: storedEdges, boundaryEdges } = data
 
@@ -627,6 +728,139 @@ export function fullyUnpackageGroup(
 }
 
 export const unpackageGroup = fullyUnpackageGroup
+
+// === Validation (F4) ===
+
+export interface ValidationError {
+  type: 'MISSING_NODE' | 'ORPHANED_EDGE' | 'INVALID_REFERENCE' | 'DUPLICATE_ID' | 'BROKEN_BOUNDARY'
+  message: string
+  nodeId?: string
+  edgeId?: string
+}
+
+export interface ValidationWarning {
+  type: 'DEGENERATE' | 'UNUSED' | 'CIRCULAR'
+  message: string
+  nodeId?: string
+}
+
+export interface ValidationResult {
+  isValid: boolean
+  errors: ValidationError[]
+  warnings: ValidationWarning[]
+}
+
+/**
+ * Validates internal structure integrity before expand/unpackage.
+ */
+export function validateInternalStructure(
+  internalStructure: SubModuleData[],
+  internalEdges: InternalEdgeData[],
+  boundaryEdges?: BoundaryEdgeData[],
+  options: { strictBoundaryCheck?: boolean } = {}
+): ValidationResult {
+  const errors: ValidationError[] = []
+  const warnings: ValidationWarning[] = []
+
+  // 1. Check for duplicate IDs
+  const nodeIdCounts = new Map<string, number>()
+  for (const sub of internalStructure) {
+    const count = nodeIdCounts.get(sub.id) ?? 0
+    nodeIdCounts.set(sub.id, count + 1)
+  }
+  for (const [id, count] of nodeIdCounts) {
+    if (count > 1) {
+      errors.push({ type: 'DUPLICATE_ID', message: `Duplicate node ID "${id}"`, nodeId: id })
+    }
+  }
+
+  // 2. Check all internalEdges reference valid nodes
+  const validNodeIds = new Set(internalStructure.map(s => s.id))
+  for (const edge of internalEdges) {
+    if (!validNodeIds.has(edge.from)) {
+      errors.push({ type: 'ORPHANED_EDGE', message: `Edge references non-existent node "${edge.from}"`, edgeId: edge.id, nodeId: edge.from })
+    }
+    if (!validNodeIds.has(edge.to)) {
+      errors.push({ type: 'ORPHANED_EDGE', message: `Edge references non-existent node "${edge.to}"`, edgeId: edge.id, nodeId: edge.to })
+    }
+  }
+
+  // 3. Check boundary edge integrity
+  if (boundaryEdges && options.strictBoundaryCheck) {
+    for (const be of boundaryEdges) {
+      if (!validNodeIds.has(be.internalNodeId)) {
+        errors.push({ type: 'BROKEN_BOUNDARY', message: `Boundary edge references internal node "${be.internalNodeId}" that does not exist`, nodeId: be.internalNodeId })
+      }
+    }
+  }
+
+  // 4. Degenerate structure warnings
+  if (internalStructure.length === 0) {
+    warnings.push({ type: 'DEGENERATE', message: 'Internal structure is empty' })
+  }
+  if (internalStructure.length === 1 && internalEdges.length > 0) {
+    warnings.push({ type: 'DEGENERATE', message: 'Single-node internal structure with edges', nodeId: internalStructure[0].id })
+  }
+
+  return { isValid: errors.length === 0, errors, warnings }
+}
+
+/**
+ * Validates boundary edge mapping is unambiguous (no handle maps to multiple internal nodes).
+ */
+export function validateBoundaryMappingConsistency(
+  boundaryEdges: BoundaryEdgeData[]
+): ValidationResult {
+  const errors: ValidationError[] = []
+
+  const handleToNodes = new Map<string, Set<string>>()
+  for (const be of boundaryEdges) {
+    const key = `${be.direction}:${be.groupHandleId}`
+    if (!handleToNodes.has(key)) handleToNodes.set(key, new Set())
+    handleToNodes.get(key)!.add(be.internalNodeId)
+  }
+
+  for (const [key, nodeSet] of handleToNodes) {
+    if (nodeSet.size > 1) {
+      const [direction, handleId] = key.split(':')
+      errors.push({ type: 'INVALID_REFERENCE', message: `Ambiguous boundary mapping: handle "${handleId}" (${direction}) maps to multiple internal nodes: ${[...nodeSet].join(', ')}` })
+    }
+  }
+
+  return { isValid: errors.length === 0, errors, warnings: [] }
+}
+
+/**
+ * Pre-expand validation for a package node.
+ */
+export function preExpandValidation(
+  groupNode: Node<CustomCompositeNodeData>,
+  _allNodes: FlowHamsterNode[],
+  _allEdges: FlowHamsterEdge[]
+): ValidationResult {
+  const data = groupNode.data as CustomCompositeNodeData
+
+  if (!data.internalStructure || data.internalStructure.length === 0) {
+    return {
+      isValid: false,
+      errors: [{ type: 'INVALID_REFERENCE', message: 'Package has no internalStructure', nodeId: groupNode.id }],
+      warnings: [],
+    }
+  }
+
+  const result = validateInternalStructure(
+    data.internalStructure,
+    data.internalEdges ?? [],
+    data.boundaryEdges as BoundaryEdgeData[],
+    { strictBoundaryCheck: true }
+  )
+
+  // Prefix errors with group node context
+  result.errors = result.errors.map(e => ({ ...e, message: `[${groupNode.id}] ${e.message}` }))
+  result.warnings = result.warnings.map(w => ({ ...w, message: `[${groupNode.id}] ${w.message}` }))
+
+  return result
+}
 
 /**
  * 获取组的大小（基于内容和端口）

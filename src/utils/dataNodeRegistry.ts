@@ -23,8 +23,8 @@ export const DATA_NODE_CATEGORIES: { [key: string]: DataNodeCategory } = {
         label: 'Folder Source',
         description: 'Load samples from a folder path',
         category: 'sources',
-        defaultParams: { path: './data/images', pattern: '*.jpg' },
-        fieldOrder: ['path', 'pattern'],
+        defaultParams: { path: './data/images', pattern: '*.jpg', recursive: false },
+        fieldOrder: ['path', 'pattern', 'recursive'],
       },
       {
         type: 'csv_source',

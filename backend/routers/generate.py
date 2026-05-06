@@ -5,7 +5,7 @@ POST /api/generate — 接收前端图结构，返回生成的 Python 代码
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
-from backend.services.ast_core import generate
+from backend.services.unified_code_gen import generate
 from backend.services.dataflow_compiler import compile_dataflow
 
 router = APIRouter()

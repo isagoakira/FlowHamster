@@ -150,8 +150,20 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: displayCode, target_device: 'cpu' }),
       })
-      const data = await res.json()
-      if (data.success) setOutput(data.output)
+      if (!res.ok) {
+        setError(`HTTP ${res.status}: ${res.statusText}`)
+        setExecuting(false)
+        return
+      }
+      let data
+      try {
+        data = await res.json()
+      } catch {
+        setError('Invalid JSON response from backend')
+        setExecuting(false)
+        return
+      }
+      if (data.success) setOutput(data.output ?? '')
       else setError(data.error || 'Unknown error')
     } catch (e: any) {
       setError('Backend not available. Start: uvicorn backend.main:app --host 0.0.0.0 --port 8000')

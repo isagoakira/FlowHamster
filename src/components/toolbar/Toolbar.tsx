@@ -10,12 +10,24 @@ import { API_BASE_URL } from '../../utils/runtimeConfig'
 import { createWorkflowDocumentFromGraph } from '../../utils/workflowDocument'
 import { WorkflowDocument } from '../../schema/workflowDocument'
 import { useWorkflowStore } from '../../stores/useWorkflowStore'
+import { useTrainingStore } from '../../hooks/useTrainingStore'
 import { WorkflowDialog } from '../dialogs/WorkflowDialog'
 import { SettingsPanel } from './panels/SettingsPanel'
 import { AllOutputsPanel } from './panels/AllOutputsPanel'
 import { TrainingConfigPanel } from './panels/TrainingConfigPanel'
+import { TrainingDashboard } from './panels/TrainingDashboard'
 import { BindingPanel } from './panels/BindingPanel'
-import { toolbarStyle, logoStyle, btnStyle, dangerBtn } from './styles/toolbarSharedStyles'
+import {
+  toolbarStyle,
+  toolbarSecondaryStyle,
+  groupSeparatorStyle,
+  logoStyle,
+  iconBtnStyle,
+  textBtnStyle,
+  activeBtnStyle,
+  settingsBtnStyle,
+  dangerBtn,
+} from './styles/toolbarSharedStyles'
 
 export function Toolbar() {
   const store = useGraphStore()
@@ -38,8 +50,6 @@ export function Toolbar() {
   const canCopySelection = selectedNodeCount > 0
   const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds)
 
-  // Package-related selectors (custom composites)
-  // Collapsed custom instances can be nested into a new package; expanded package shells cannot.
   const canPackage = selectedNodeIds.length >= 2 && selectedNodeIds.every(id => {
     const node = nodes.find(n => n.id === id)
     const data = node?.data as any
@@ -62,13 +72,12 @@ export function Toolbar() {
   const [showBindings, setShowBindings] = useState(false)
   const [showAllOutputs, setShowAllOutputs] = useState(false)
   const [showWorkflowDialog, setShowWorkflowDialog] = useState(false)
+  const [showTrainingDashboard, setShowTrainingDashboard] = useState(false)
   const [gradientMode, setGradientMode] = useState(false)
 
-  // Workflow state
   const workflowStore = useWorkflowStore()
   const { currentWorkflowName, isDirty, saveWorkflow, currentWorkflowId } = workflowStore
 
-  // Build complete WorkflowDocument from current state
   const buildCurrentDocument = useCallback((): WorkflowDocument => {
     return createWorkflowDocumentFromGraph(store.nodes, store.edges, {
       name: currentWorkflowName || 'Untitled',
@@ -80,7 +89,6 @@ export function Toolbar() {
     })
   }, [store.nodes, store.edges, currentWorkflowName, trainingConfig, dataNodes, dataEdges, bindings])
 
-  // Ctrl+S: Save workflow
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
@@ -88,13 +96,10 @@ export function Toolbar() {
           e.preventDefault()
           if (currentWorkflowId) {
             const doc = buildCurrentDocument()
-            saveWorkflow(doc).then((ok) => {
-              if (ok) console.log('Workflow saved')
-            })
+            saveWorkflow(doc).then((ok) => { if (ok) console.log('Workflow saved') })
           }
         }
         if (e.key === 'a' && !e.shiftKey) {
-          // Ctrl+A: Select all nodes
           e.preventDefault()
           const allNodeIds = store.nodes.map((n) => n.id)
           store.setSelection(allNodeIds, [])
@@ -105,11 +110,8 @@ export function Toolbar() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [currentWorkflowId, buildCurrentDocument, saveWorkflow, store.nodes, store])
 
-  // Mark dirty when graph changes
   useEffect(() => {
-    if (currentWorkflowId) {
-      workflowStore.setDirty(true)
-    }
+    if (currentWorkflowId) workflowStore.setDirty(true)
   }, [store.nodes, store.edges, currentWorkflowId])
 
   const handleOpenWorkflow = (document: WorkflowDocument) => {
@@ -118,10 +120,7 @@ export function Toolbar() {
     store.setTrainingConfig(document.trainingConfig)
     store.setBindings(document.bindings)
     loadDataGraph(document.dataGraph.nodes as any[], document.dataGraph.edges as any[])
-    // Set as current workflow in store
-    if (document.metadata?.name) {
-      workflowStore.openWorkflow(document.metadata.name)
-    }
+    if (document.metadata?.name) workflowStore.openWorkflow(document.metadata.name)
   }
 
   const handleGradientAnalysis = async () => {
@@ -137,10 +136,8 @@ export function Toolbar() {
         body: JSON.stringify({
           nodes: executableGraph.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
           edges: executableGraph.edges.map((e) => ({
-            source: e.source,
-            target: e.target,
-            sourceHandle: e.sourceHandle ?? null,
-            targetHandle: e.targetHandle ?? null,
+            source: e.source, target: e.target,
+            sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null,
             data: e.data,
           })),
         }),
@@ -184,6 +181,69 @@ export function Toolbar() {
     URL.revokeObjectURL(url)
   }, [store.nodes, store.edges, store.features, trainingConfig, dataNodes, dataEdges, bindings])
 
+  const handleExportNotebook = async () => {
+    const graph = {
+      nodes: executableGraph.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
+      edges: executableGraph.edges.map((e) => ({
+        source: e.source, target: e.target,
+        sourceHandle: e.sourceHandle ?? null, targetHandle: e.targetHandle ?? null,
+        data: e.data,
+      })),
+    }
+    try {
+      const res = await exportNotebook(graph, 'flowhamster_model', trainingConfig,
+        { nodes: dataNodes as any[], edges: dataEdges as any[] }, bindings)
+      if (res.success) {
+        downloadFile(res.content, res.filename, res.mime_type)
+      } else {
+        alert('Export notebook failed: ' + res.filename)
+      }
+    } catch {
+      alert('Export notebook failed: backend not available. Start backend first.')
+    }
+  }
+
+  const handleStartTraining = useCallback(async () => {
+    const doc = buildCurrentDocument()
+    const cfg = trainingConfig
+    const config = {
+      epochs: cfg.runtime?.epochs ?? 10,
+      batchSize: cfg.runtime?.batchSize ?? 32,
+      optimizer: cfg.optimizer?.type ?? 'adam',
+      learningRate: (cfg.optimizer?.params?.learningRate as number) ?? 0.001,
+      momentum: (cfg.optimizer?.params?.momentum as number) ?? 0.9,
+      weightDecay: (cfg.optimizer?.params?.weightDecay as number) ?? 0.0,
+      scheduler: cfg.scheduler?.type ?? 'cosine',
+      stepSize: (cfg.scheduler?.params?.stepSize as number) ?? 10,
+      gamma: (cfg.scheduler?.params?.gamma as number) ?? 0.1,
+      warmupEpochs: (cfg.scheduler?.params?.warmupEpochs as number) ?? 0,
+      checkpoint: {
+        enabled: cfg.checkpoint?.enabled ?? true,
+        saveTopK: cfg.checkpoint?.saveTopK ?? 3,
+        monitor: cfg.checkpoint?.monitor ?? 'val_loss',
+        mode: cfg.checkpoint?.mode ?? 'min',
+      },
+      dataConfig: {
+        trainDir: '',
+        valDir: '',
+        numWorkers: cfg.runtime?.numWorkers ?? 4,
+      },
+    }
+    try {
+      await useTrainingStore.getState().startTraining(doc, config)
+      setShowTrainingDashboard(true)
+    } catch {
+      alert('Failed to start training. Is the backend running?')
+    }
+  }, [buildCurrentDocument, trainingConfig])
+
+  const closeAllPanels = () => {
+    setShowSettings(false)
+    setShowTrainingConfig(false)
+    setShowBindings(false)
+    setShowTrainingDashboard(false)
+  }
+
   const handleClear = () => {
     if (confirm(workspaceMode === 'model' ? 'Clear all model nodes?' : 'Clear all data nodes?')) {
       if (workspaceMode === 'model') {
@@ -197,57 +257,89 @@ export function Toolbar() {
 
   return (
     <>
-      <div
-        style={toolbarStyle}
-        onClick={() => {
-          if (showSettings) setShowSettings(false)
-          if (showTrainingConfig) setShowTrainingConfig(false)
-          if (showBindings) setShowBindings(false)
-        }}
-      >
+      {/* ===== UPPER TOOLBAR: Editing operations ===== */}
+      <div style={toolbarStyle}>
         <span style={logoStyle}>FlowHamster</span>
 
+        <div style={groupSeparatorStyle} />
+
+        {/* Workspace toggle */}
         <button
-          style={{ ...btnStyle, color: workspaceMode === 'model' ? '#88aaff' : '#ccc' }}
+          style={{ ...iconBtnStyle, color: workspaceMode === 'model' ? '#88aaff' : '#aaa' }}
           onClick={() => store.setWorkspaceMode('model')}
-          title="Model graph workspace"
+          title="Model workspace"
         >
-          🧠 Model
+          🧠
         </button>
         <button
-          style={{ ...btnStyle, color: workspaceMode === 'data' ? '#88aaff' : '#ccc' }}
+          style={{ ...iconBtnStyle, color: workspaceMode === 'data' ? '#88aaff' : '#aaa' }}
           onClick={() => store.setWorkspaceMode('data')}
-          title="Data graph workspace"
+          title="Data workspace"
         >
-          🗂 Data
+          🗂
         </button>
 
+        <div style={groupSeparatorStyle} />
+
+        {/* History */}
         <button
-          style={{ ...btnStyle, opacity: canUndo ? 1 : 0.4 }}
+          style={{ ...iconBtnStyle, opacity: canUndo ? 1 : 0.35 }}
           onClick={() => store.undo()}
           disabled={!canUndo}
-          title="Undo (Ctrl+Z)"
+          title="Undo"
         >
-          ↩ Undo
+          ↩
         </button>
         <button
-          style={{ ...btnStyle, opacity: canRedo ? 1 : 0.4 }}
+          style={{ ...iconBtnStyle, opacity: canRedo ? 1 : 0.35 }}
           onClick={() => store.redo()}
           disabled={!canRedo}
-          title="Redo (Ctrl+Shift+Z / Ctrl+Y)"
+          title="Redo"
         >
-          ↪ Redo
+          ↪
+        </button>
+
+        <div style={groupSeparatorStyle} />
+
+        {/* Clipboard */}
+        <button
+          style={{ ...iconBtnStyle, opacity: canCopySelection ? 1 : 0.35 }}
+          onClick={() => store.copySelection()}
+          disabled={!canCopySelection}
+          title="Copy"
+        >
+          📋
         </button>
         <button
-          style={{ ...btnStyle, opacity: canPackage ? 1 : 0.4 }}
+          style={{ ...iconBtnStyle, opacity: hasClipboard ? 1 : 0.35 }}
+          onClick={() => store.pasteClipboard()}
+          disabled={!hasClipboard}
+          title="Paste"
+        >
+          📥
+        </button>
+        <button
+          style={{ ...iconBtnStyle, opacity: hasSelection ? 1 : 0.35 }}
+          onClick={() => store.deleteSelection()}
+          disabled={!hasSelection}
+          title="Delete"
+        >
+          ⌫
+        </button>
+
+        <div style={groupSeparatorStyle} />
+
+        {/* Structure */}
+        <button
+          style={{ ...iconBtnStyle, opacity: canPackage ? 1 : 0.35 }}
           onClick={() => store.packageSelection()}
           disabled={!canPackage}
-          title="Package selected modules into a single module"
+          title="Package"
         >
-          📦 Package
+          📦
         </button>
         <button
-          style={{ ...btnStyle, opacity: hasExpandedPackage ? 1 : 0.4 }}
+          style={{ ...iconBtnStyle, opacity: hasExpandedPackage ? 1 : 0.35 }}
           onClick={() => {
             const groupId = selectedNodeIds.find(id => {
               const node = nodes.find(n => n.id === id)
@@ -256,12 +348,12 @@ export function Toolbar() {
             if (groupId) store.collapseGroup(groupId)
           }}
           disabled={!hasExpandedPackage}
-          title="Collapse expanded composite"
+          title="Collapse"
         >
-          🔽 Collapse
+          🔽
         </button>
         <button
-          style={{ ...btnStyle, opacity: hasCollapsedPackage ? 1 : 0.4 }}
+          style={{ ...iconBtnStyle, opacity: hasCollapsedPackage ? 1 : 0.35 }}
           onClick={() => {
             const groupId = selectedNodeIds.find(id => {
               const node = nodes.find(n => n.id === id)
@@ -270,156 +362,125 @@ export function Toolbar() {
             if (groupId) store.expandGroup(groupId)
           }}
           disabled={!hasCollapsedPackage}
-          title="Expand composite to see internal structure"
+          title="Expand"
         >
-          🔼 Expand
-        </button>
-        <button
-          style={{ ...btnStyle, opacity: canCopySelection ? 1 : 0.4 }}
-          onClick={() => store.copySelection()}
-          disabled={!canCopySelection}
-          title="Copy selected modules and connections"
-        >
-          📋 Copy
-        </button>
-        <button
-          style={{ ...btnStyle, opacity: hasClipboard ? 1 : 0.4 }}
-          onClick={() => store.pasteClipboard()}
-          disabled={!hasClipboard}
-          title="Paste copied modules"
-        >
-          📥 Paste
-        </button>
-        <button
-          style={{ ...btnStyle, opacity: hasSelection ? 1 : 0.4 }}
-          onClick={() => store.deleteSelection()}
-          disabled={!hasSelection}
-          title="Delete selected modules"
-        >
-          ⌫ Delete
+          🔼
         </button>
 
         <div style={{ flex: 1 }} />
 
-        {/* Phase 5: Tensor Preview — only shown when feature is enabled */}
+        {/* Auto Layout — right pinned */}
+        <button
+          style={iconBtnStyle}
+          onClick={handleAutoLayout}
+          title="Auto Layout"
+        >
+          ↗
+        </button>
+      </div>
+
+      {/* ===== LOWER TOOLBAR: Panel & Export actions ===== */}
+      <div
+        style={toolbarSecondaryStyle}
+        onClick={closeAllPanels}
+      >
+        {/* Train */}
+        <button
+          style={showTrainingConfig ? activeBtnStyle : textBtnStyle}
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowBindings(false)
+            setShowTrainingConfig(!showTrainingConfig)
+          }}
+        >
+          🏋️ Train
+        </button>
+
+        {/* Bind */}
+        <button
+          style={showBindings ? activeBtnStyle : textBtnStyle}
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowTrainingConfig(false)
+            setShowBindings(!showBindings)
+          }}
+        >
+          🔗 Bind
+        </button>
+
+        {/* Workflow */}
+        <button
+          style={{
+            ...textBtnStyle,
+            background: currentWorkflowName ? '#1a2a3a' : '#1a1a1a',
+            borderColor: currentWorkflowName ? '#3355aa' : '#2e2e2e',
+            color: currentWorkflowName ? '#88aaff' : '#ccc',
+          }}
+          onClick={(e) => { e.stopPropagation(); setShowWorkflowDialog(true) }}
+        >
+          {currentWorkflowName ? `📂 ${currentWorkflowName}${isDirty ? ' *' : ''}` : '📂 Workflow'}
+        </button>
+
+        <div style={groupSeparatorStyle} />
+
+        {/* Export */}
+        <button style={textBtnStyle} onClick={(e) => { e.stopPropagation(); handleExportPy() }}>
+          Export .py
+        </button>
+        <button style={textBtnStyle} onClick={(e) => { e.stopPropagation(); handleExportNotebook() }}>
+          Export .ipynb
+        </button>
+
+        <div style={{ flex: 1 }} />
+
+        {/* Feature-gated: Run Preview */}
         {store.features.tensorPreview && (
           <button
-            style={{ ...btnStyle, background: '#1a2a3a', borderColor: '#3355aa', color: '#88aaff' }}
-            onClick={handleRunPreview}
+            style={activeBtnStyle}
+            onClick={(e) => { e.stopPropagation(); handleRunPreview() }}
             disabled={previewLoading}
-            title="Run forward pass on entire graph, show all outputs"
           >
             {previewLoading ? '⏳ Running...' : '▶ Run Preview'}
           </button>
         )}
 
-        <button style={btnStyle} onClick={handleAutoLayout} title="Dagre auto layout">
-          ↗ Auto Layout
-        </button>
+        {/* Train button */}
         <button
-          style={{ ...btnStyle, color: showTrainingConfig ? '#88aaff' : '#ccc' }}
-          onClick={(e) => {
-            e.stopPropagation()
-            setShowSettings(false)
-            setShowBindings(false)
-            setShowTrainingConfig(!showTrainingConfig)
-          }}
-          title="Training configuration"
+          style={{ ...activeBtnStyle, background: '#c0392b', borderColor: '#922b21', color: '#fff' }}
+          onClick={(e) => { e.stopPropagation(); handleStartTraining() }}
+          title="Start training run"
         >
-          🏋️ Train
-        </button>
-        <button
-          style={{ ...btnStyle, color: showBindings ? '#88aaff' : '#ccc' }}
-          onClick={(e) => {
-            e.stopPropagation()
-            setShowSettings(false)
-            setShowTrainingConfig(false)
-            setShowBindings(!showBindings)
-          }}
-          title="Binding configuration"
-        >
-          🔗 Bind
-        </button>
-        {/* Workflow Manager */}
-        <button
-          style={{
-            ...btnStyle,
-            background: currentWorkflowName ? '#1a2a3a' : '#1a1a1a',
-            borderColor: currentWorkflowName ? '#3355aa' : '#333',
-            color: currentWorkflowName ? '#88aaff' : '#ccc',
-          }}
-          onClick={() => setShowWorkflowDialog(true)}
-          title="Workflow Manager"
-        >
-          {currentWorkflowName ? `📂 ${currentWorkflowName}${isDirty ? ' *' : ''}` : '📂 Workflow'}
-        </button>
-        <button style={btnStyle} onClick={handleExportPy}>
-          Export .py
-        </button>
-        <button
-          style={btnStyle}
-          onClick={async () => {
-            const graph = {
-              nodes: executableGraph.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
-              edges: executableGraph.edges.map((e) => ({
-                source: e.source,
-                target: e.target,
-                sourceHandle: e.sourceHandle ?? null,
-                targetHandle: e.targetHandle ?? null,
-                data: e.data,
-              })),
-            }
-            try {
-              const res = await exportNotebook(
-                graph,
-                'flowhamster_model',
-                trainingConfig,
-                { nodes: dataNodes as any[], edges: dataEdges as any[] },
-                bindings
-              )
-              if (res.success) {
-                downloadFile(res.content, res.filename, res.mime_type)
-              } else {
-                alert('Export notebook failed: ' + res.filename)
-              }
-            } catch {
-              alert('Export notebook failed: backend not available. Start backend first.')
-            }
-          }}
-        >
-          Export .ipynb
+          🚀 Train
         </button>
 
-        {/* Settings gear — always visible */}
+        {/* Settings */}
         <button
-          style={{ ...btnStyle, padding: '4px 8px', fontSize: '14px', color: showSettings ? '#88aaff' : '#666' }}
+          style={{ ...settingsBtnStyle, color: showSettings ? '#88aaff' : '#555' }}
           onClick={(e) => { e.stopPropagation(); setShowSettings(!showSettings) }}
-          title="Settings"
         >
           ⚙
         </button>
 
+        {/* Feature-gated: Gradient Analysis */}
         {store.features.gradientViz && (
           <button
-            style={{
-              ...btnStyle,
-              background: gradientMode ? '#2a4a2a' : '#1a2a1a',
-              borderColor: gradientMode ? '#55aa55' : '#336633',
-              color: gradientMode ? '#aaffaa' : '#88cc88',
-            }}
-            onClick={handleGradientAnalysis}
-            title="Analyze gradient flow on canvas"
+            style={gradientMode ? activeBtnStyle : textBtnStyle}
+            onClick={(e) => { e.stopPropagation(); handleGradientAnalysis() }}
           >
             {gradientMode ? '✅ Exit Gradient' : '📉 Gradient Analysis'}
           </button>
         )}
 
-        <button style={dangerBtn} onClick={handleClear} title="Clear all nodes">
-          🗑 Clear
+        {/* Clear */}
+        <button
+          style={dangerBtn}
+          onClick={(e) => { e.stopPropagation(); handleClear() }}
+        >
+          🗑
         </button>
       </div>
 
-      {/* Settings panel */}
+      {/* Panels */}
       {showSettings && (
         <>
           <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowSettings(false)} />
@@ -441,7 +502,13 @@ export function Toolbar() {
         </>
       )}
 
-      {/* All outputs panel — shown after Run Preview */}
+      {showTrainingDashboard && (
+        <>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowTrainingDashboard(false)} />
+          <TrainingDashboard onClose={() => setShowTrainingDashboard(false)} />
+        </>
+      )}
+
       {showAllOutputs && (
         <>
           <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowAllOutputs(false)} />
@@ -449,7 +516,6 @@ export function Toolbar() {
         </>
       )}
 
-      {/* Workflow Dialog */}
       {showWorkflowDialog && (
         <WorkflowDialog
           onClose={() => setShowWorkflowDialog(false)}

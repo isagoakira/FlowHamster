@@ -209,6 +209,7 @@ function FlowCanvas() {
   const packageViewerOpen = useGraphStore((s) => s.packageViewerOpen)
   const packageViewerData = useGraphStore((s) => s.packageViewerData)
   const closePackageViewer = useGraphStore((s) => s.closePackageViewer)
+  const openPackageViewer = useGraphStore((s) => s.openPackageViewer)
   const [gradientData, setGradientData] = useState<{
     edges: Array<{ source: string; target: string; gradient_strength: number; direction: string }>
     nodes: Array<{ id: string; gradient_score: number; risk: string }>
@@ -542,6 +543,7 @@ function FlowCanvas() {
       {/* Package Viewer Dialog */}
       <PackageViewerDialog
         isOpen={packageViewerOpen}
+        mode={useGraphStore((s) => s.packageViewerMode)}
         packageData={packageViewerData}
         onClose={closePackageViewer}
         onUnpackage={() => {
@@ -617,6 +619,24 @@ function FlowCanvas() {
 	            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
 	          >
 	            🏷️ 重命名类
+	          </div>
+	          <div
+	            style={{              padding: '8px 16px',
+              cursor: 'pointer',
+              color: '#f97316',
+              fontSize: '13px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+            onClick={() => {
+              openPackageViewer(contextMenu.nodeId, 'edit')
+              setContextMenu(null)
+            }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#2a2a2a')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+          >
+	            ✨️ 编辑类定义
 	          </div>
 	          <div
 	            style={{
