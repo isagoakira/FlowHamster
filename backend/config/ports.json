@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FlowHamster Port Configuration",
+  "description": "Unified port configuration for FlowHamster backend and frontend",
+  "ports": {
+    "backend": {
+      "api": 8000,
+      "description": "FastAPI server port"
+    },
+    "frontend": {
+      "dev": 5173,
+      "description": "Vite development server"
+    }
+  },
+  "cors": {
+    "allowedOrigins": [
+      "http://localhost:5173",
+      "http://127.0.0.1:5173",
+      "http://192.168.102.231:5173"
+    ],
+    "description": "Allowed CORS origins for frontend-backend communication"
+  },
+  "websocket": {
+    "paths": {
+      "code": "/ws/code",
+      "ssh_logs": "/api/ssh/ws/logs"
+    },
+    "heartbeat_interval_seconds": 30,
+    "description": "WebSocket endpoint configuration"
+  },
+  "ssh": {
+    "default_port": 22,
+    "default_timeout_seconds": 10.0,
+    "max_reconnect_attempts": 3,
+    "keepalive_interval_seconds": 30,
+    "description": "SSH connection defaults"
+  },
+  "execution": {
+    "subprocess_timeout_seconds": 60,
+    "description": "Local code execution limits"
+  }
+}

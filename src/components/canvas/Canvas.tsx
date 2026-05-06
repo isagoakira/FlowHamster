@@ -520,7 +520,7 @@ function FlowCanvas() {
         style={{ background: '#0a0a0a' }}
         defaultEdgeOptions={{ type: 'smoothstep', animated: !gradientData }}
       >
-        <Background color="#222" gap={20} />
+        <Background color="#2a2a2a" gap={20} size={1} />
         <Controls style={{ background: '#1a1a1a', border: '1px solid #333' }} />
         <MiniMap nodeColor="#334" maskColor="rgba(0,0,0,0.8)" style={{ background: '#111', border: '1px solid #333' }} />
       </ReactFlow>

@@ -1,6 +1,10 @@
 """
 POST /api/export       — 导出为 .py 文件（旧接口，保留兼容）
 POST /api/export-notebook — 导出为 .ipynb Jupyter Notebook（推荐）
+
+导出模块支持两种格式：
+- .py: 纯 Python 源码文件
+- .ipynb: Jupyter Notebook，按 import / class / main 拆分为多个 cell
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -14,12 +18,29 @@ router = APIRouter()
 
 
 class ExportRequest(BaseModel):
+    """
+    代码导出请求（已有代码字符串）
+
+    Attributes:
+        code: 完整的 Python 代码字符串
+        format: 导出格式，"py" 或 "ipynb"（默认 "py"）
+        filename: 导出文件名（不含扩展名）
+    """
     code: str
     format: str = "py"  # "py" or "ipynb"
     filename: str = "flowhamster_model"
 
 
 class ExportResponse(BaseModel):
+    """
+    导出响应
+
+    Attributes:
+        success: 是否成功导出
+        content: 文件内容的 base64 编码字符串
+        filename: 建议的文件名（含正确扩展名）
+        mime_type: MIME 类型（text/x-python 或 application/x-ipynb+json）
+    """
     success: bool
     content: str  # base64 encoded
     filename: str
@@ -104,6 +125,15 @@ def _build_notebook(cells_source: list[str]) -> str:
 
 @router.post("/export", response_model=ExportResponse)
 async def export_code(req: ExportRequest):
+    """
+    将已有代码导出为文件。
+
+    支持 .py 和 .ipynb 两种格式。
+    返回 base64 编码的文件内容。
+
+    Returns:
+        ExportResponse: 包含 base64 编码的文件内容
+    """
     if req.format == "ipynb":
         cells = _split_code_into_cells(req.code)
         content = _build_notebook(cells)
@@ -125,7 +155,18 @@ async def export_code(req: ExportRequest):
 
 
 class NotebookExportRequest(BaseModel):
-    """导出一个完整的 Jupyter Notebook，接收前端图 JSON。"""
+    """
+    导出为 Jupyter Notebook 的请求
+
+    与 /export 不同，这里接收前端 flow JSON，后端负责代码生成。
+
+    Attributes:
+        graph: 前端 flow_json（nodes + edges）
+        filename: 导出文件名（不含扩展名）
+        training_config: 可选，训练配置
+        data_graph: 可选，数据流图
+        bindings: 可选，输入输出绑定
+    """
     graph: dict          # 前端 flow_json（nodes + edges）
     filename: str = "flowhamster_model"
     training_config: dict | None = None
@@ -157,8 +198,17 @@ def _build_workflow_scaffold(data_graph: dict | None, bindings: list[dict] | Non
 async def export_notebook(req: NotebookExportRequest):
     """
     推荐接口：前端直接传 graph JSON，后端负责代码生成 + cell 划分。
-    支持 data_graph 和 bindings 参数。
-    返回 base64 编码的 .ipynb 文件内容。
+
+    生成的 notebook 包含以下 cell：
+    1. Markdown 头部说明
+    2. Import 语句
+    3. FlowHamsterModel 类定义
+    4. if __name__ == "__main__" 块（实例化和 print）
+
+    支持 data_graph 和 bindings 参数，会追加数据流相关的 scaffold。
+
+    Returns:
+        ExportResponse: base64 编码的 .ipynb 文件内容
     """
     try:
         # 1. 用 ast_core 生成完整代码

@@ -22,6 +22,7 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
   const [executing, setExecuting] = useState(false)
   const [output, setOutput] = useState('')
   const [error, setError] = useState('')
+  const [copySuccess, setCopySuccess] = useState('')
   const backendAvailable = useRef(false)
   const [localCode, setLocalCode] = useState('')
 
@@ -171,6 +172,13 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
     setExecuting(false)
   }
 
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(displayCode || '').then(() => {
+      setCopySuccess('Copied!')
+      setTimeout(() => setCopySuccess(''), 2000)
+    })
+  }, [displayCode])
+
   return (
     <div style={panelStyle}>
       {/* 拖拽调整宽度的把手 */}
@@ -206,6 +214,24 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
             </button>
           )}
           <span style={{ color: '#444', fontWeight: 400, fontSize: '10px' }}>Python</span>
+          {copySuccess && (
+            <span style={{ fontSize: 10, color: '#44cc88', fontWeight: 700 }}>{copySuccess}</span>
+          )}
+          <button
+            onClick={handleCopy}
+            style={{
+              background: 'transparent',
+              border: '1px solid #333',
+              borderRadius: 4,
+              color: '#888',
+              fontSize: 10,
+              cursor: 'pointer',
+              padding: '2px 6px',
+            }}
+            title="Copy code to clipboard"
+          >
+            Copy
+          </button>
         </div>
       </div>
       <SyntaxHighlighter

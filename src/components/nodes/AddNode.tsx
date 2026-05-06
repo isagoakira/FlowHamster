@@ -2,8 +2,8 @@ import { memo, useState } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 import { NodeData } from '../../types/graph'
 import { useGraphStore } from '../../hooks/useGraphStore'
+import { BASE_NODE_STYLE, HANDLE_TARGET_STYLE, HANDLE_SOURCE_STYLE, DELETE_BUTTON_STYLE } from './nodeStyles'
 
-const ns = { background: '#1a1a1a', border: '1px solid #333', borderRadius: '8px', padding: '10px 14px', minWidth: '140px', color: '#e0e0e0', fontSize: '13px', position: 'relative' as const }
 const hlabel = { fontSize: '9px', color: '#aaa', textAlign: 'center' as const, position: 'absolute' as const, left: 0, right: 0 }
 
 const AddNode = memo((props: NodeProps<NodeData>) => {
@@ -13,20 +13,17 @@ const AddNode = memo((props: NodeProps<NodeData>) => {
 
   return (
     <div
-      style={{ ...ns, borderColor: h ? '#ffcc44' : '#333' }}
+      style={{ ...BASE_NODE_STYLE, borderColor: h ? '#ffcc44' : '#333', boxShadow: h ? '0 4px 16px rgba(0,0,0,0.5)' : BASE_NODE_STYLE.boxShadow }}
       onMouseEnter={() => setH(true)} onMouseLeave={() => setH(false)}
     >
       {h && (
         <button
           onClick={(e) => { e.stopPropagation(); removeNode(id) }}
-          style={{
-            position: 'absolute', top: 4, right: 4,
-            background: '#ff4444', border: 'none', borderRadius: '50%',
-            width: 18, height: 18, cursor: 'pointer', color: '#fff',
-            fontSize: 11, lineHeight: 1, padding: 0,
-          }}
+          style={DELETE_BUTTON_STYLE}
           title="Delete node"
-        >×</button>
+        >
+          x
+        </button>
       )}
 
       {/* Input A — top */}
@@ -43,7 +40,7 @@ const AddNode = memo((props: NodeProps<NodeData>) => {
       <div style={{ fontSize: '10px', color: '#666', textAlign: 'center' }}>A + B</div>
 
       {/* Output — right */}
-      <Handle type="source" position={Position.Right} style={{ background: '#44cc88', width: 8, height: 8, border: 'none', top: '50%' }} />
+      <Handle type="source" position={Position.Right} style={HANDLE_SOURCE_STYLE} />
     </div>
   )
 })

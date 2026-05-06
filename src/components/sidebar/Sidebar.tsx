@@ -77,6 +77,23 @@ const categoryStyle: React.CSSProperties = {
   color: '#555',
   textTransform: 'uppercase',
   letterSpacing: '1px',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '6px',
+}
+
+// Category color indicators
+const CATEGORY_COLORS: Record<string, string> = {
+  'Layers': '#a0c0ff',
+  'Activation Functions': '#88dd88',
+  'Normalization': '#dd88dd',
+  'Input / Output': '#6688cc',
+  'Loss Functions': '#ff6666',
+  'Optimizers': '#44cc44',
+  'Schedulers': '#ccaa44',
+  'Attention / Transformer': '#dd88ff',
+  'Composite': '#44ffcc',
+  'Custom': '#44ffcc',
 }
 
 const nodeItemStyle: React.CSSProperties = {
@@ -277,6 +294,7 @@ export default function Sidebar() {
 
             {visibleCategories.map((cat) => {
               const isCollapsed = collapsedCategories.has(cat.label)
+              const catColor = CATEGORY_COLORS[cat.label] || '#555'
               return (
                 <div key={cat.label}>
                   <div
@@ -284,6 +302,7 @@ export default function Sidebar() {
                     onClick={() => toggleCategory(cat.label)}
                   >
                     <span style={categoryStyle}>
+                      <span style={{ color: catColor, fontSize: '8px' }}>●</span>
                       {isCollapsed ? '▶' : '▼'} {cat.label}
                     </span>
                     <span style={{ fontSize: '9px', color: '#444' }}>
@@ -316,6 +335,7 @@ export default function Sidebar() {
 	              <div key="custom">
 	                <div style={{ ...categoryHeaderStyle, marginTop: '14px' }} onClick={() => toggleCategory('Custom')}>
 	                  <span style={categoryStyle}>
+	                    <span style={{ color: '#44ffcc', fontSize: '8px' }}>●</span>
 	                    {collapsedCategories.has('Custom') ? '▶' : '▼'} Custom
 	                  </span>
 	                  <span style={{ fontSize: '9px', color: '#444' }}>

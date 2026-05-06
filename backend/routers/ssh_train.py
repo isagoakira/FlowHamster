@@ -1,7 +1,23 @@
 """
 SSH Training Router
 
-Provides API endpoints for SSH-based remote training control.
+提供基于 SSH 的远程训练控制 API。
+
+主要功能:
+- 连接/断开远程 SSH 主机
+- 在远程主机上执行命令
+- 提交、监控、停止远程训练任务
+- WebSocket 实时日志流
+
+连接管理:
+- 连接参数: host, username, password/key_filename, port
+- 每个连接以 "username@host:port" 为 key 存储
+- 支持 keepalive 保活和自动重连
+
+训练任务:
+- 通过 nohup 提交后台任务
+- 日志输出重定向到临时文件
+- PID 用于后续查询状态和停止任务
 """
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
@@ -214,18 +230,35 @@ async def list_connections():
 
 # WebSocket for real-time log streaming
 class ConnectionManager:
+    """
+    WebSocket 连接管理器。
+
+    用于广播消息到所有已连接的 WebSocket 客户端。
+    目前在 /ws/logs 路由中未直接使用（每个连接独立处理），
+    但保留此类以备广播场景（如全局通知）使用。
+
+    注意: disconnect 在异常发生时需要由调用方主动触发。
+    """
+
     def __init__(self):
         self.active_connections: List[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
+        """接受 WebSocket 连接并注册。"""
         await websocket.accept()
         self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
+        """从活跃连接列表中移除 WebSocket。"""
         if websocket in self.active_connections:
             self.active_connections.remove(websocket)
 
     async def broadcast(self, message: str):
+        """
+        向所有活跃连接广播消息。
+
+        发送失败的连接会被静默忽略并在下一次广播前清理。
+        """
         for connection in self.active_connections:
             try:
                 await connection.send_text(message)
@@ -239,9 +272,20 @@ manager_ws = ConnectionManager()
 @router.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket, pid: int = -1):
     """
-    WebSocket endpoint for real-time training log streaming.
+    WebSocket 端点，实时推送训练日志。
 
-    Connect with: ws://host:port/api/ssh/ws/logs?pid=12345
+    连接方式: ws://host:port/api/ssh/ws/logs?pid=12345
+
+    客户端连接时传入 pid 参数，服务器每 1 秒检查一次日志更新，
+    将新增的日志行推送给客户端。
+
+    推送消息格式:
+        {"type": "log", "pid": int, "line": str}  — 日志行
+        {"type": "status", "pid": int, "status": str}  — 训练结束状态
+
+    训练任务完成（completed/killed/error）后，服务器主动关闭连接。
+
+    如果连接建立后 pid <= 0，服务器立即关闭连接（不推送任何消息）。
     """
     await websocket.accept()
 

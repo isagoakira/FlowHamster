@@ -2,17 +2,15 @@ import { memo, useCallback, useState } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 import { NodeData } from '../../types/graph'
 import { useGraphStore } from '../../hooks/useGraphStore'
-
-// Common styles shared by all nodes
-const nodeStyle: React.CSSProperties = {
-  background: '#1a1a1a',
-  border: '1px solid #333',
-  borderRadius: '8px',
-  padding: '10px 14px',
-  minWidth: '160px',
-  color: '#e0e0e0',
-  fontSize: '13px',
-}
+import {
+  BASE_NODE_STYLE,
+  HANDLE_TARGET_STYLE,
+  HANDLE_SOURCE_STYLE,
+  PARAM_INPUT_STYLE,
+  PARAM_ROW_STYLE,
+  PARAM_LABEL_STYLE,
+  DELETE_BUTTON_STYLE,
+} from './nodeStyles'
 
 const headerStyle: React.CSSProperties = {
   fontWeight: 600,
@@ -23,36 +21,12 @@ const headerStyle: React.CSSProperties = {
   letterSpacing: '0.5px',
 }
 
-const paramRowStyle: React.CSSProperties = {
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  marginBottom: '4px',
-  gap: '8px',
-}
-
-const labelStyle: React.CSSProperties = {
-  color: '#888',
-  fontSize: '11px',
-  flex: '0 0 60px',
-}
-
-const inputStyle: React.CSSProperties = {
-  background: '#111',
-  border: '1px solid #333',
-  borderRadius: '4px',
-  color: '#e0e0e0',
-  padding: '2px 6px',
-  fontSize: '12px',
-  width: '70px',
-  textAlign: 'right',
-}
-
 interface BaseNodeProps extends NodeProps<NodeData> {}
 
 export const BaseNode = memo(({ id, data }: BaseNodeProps) => {
   const updateNodeData = useGraphStore((s) => s.updateNodeData)
   const [hovered, setHovered] = useState(false)
+  const removeNode = useGraphStore((s) => s.removeNode)
 
   const handleParamChange = useCallback(
     (key: string, value: string) => {
@@ -66,25 +40,34 @@ export const BaseNode = memo(({ id, data }: BaseNodeProps) => {
 
   return (
     <div
-      style={{ ...nodeStyle, borderColor: hovered ? '#4488ff' : '#333' }}
+      style={{
+        ...BASE_NODE_STYLE,
+        borderColor: hovered ? '#4488ff' : '#333',
+        boxShadow: hovered ? '0 4px 16px rgba(0,0,0,0.5)' : BASE_NODE_STYLE.boxShadow,
+      }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
+      {hovered && (
+        <button
+          onClick={(e) => { e.stopPropagation(); removeNode(id) }}
+          style={DELETE_BUTTON_STYLE}
+          title="Delete node"
+        >
+          x
+        </button>
+      )}
       {/* Target handle (left) */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        style={{ background: '#4488ff', width: 8, height: 8, border: 'none' }}
-      />
+      <Handle type="target" position={Position.Left} style={HANDLE_TARGET_STYLE} />
 
       <div style={headerStyle}>{data.label}</div>
 
       <div style={{ marginBottom: '4px' }}>
         {Object.entries(data.params).map(([key, val]) => (
-          <div key={key} style={paramRowStyle}>
-            <span style={labelStyle}>{key}</span>
+          <div key={key} style={PARAM_ROW_STYLE}>
+            <span style={PARAM_LABEL_STYLE}>{key}</span>
             <input
-              style={inputStyle}
+              style={PARAM_INPUT_STYLE}
               value={String(val)}
               onChange={(e) => handleParamChange(key, e.target.value)}
               type={typeof val === 'number' ? 'number' : 'text'}
@@ -94,11 +77,7 @@ export const BaseNode = memo(({ id, data }: BaseNodeProps) => {
       </div>
 
       {/* Source handle (right) */}
-      <Handle
-        type="source"
-        position={Position.Right}
-        style={{ background: '#44cc88', width: 8, height: 8, border: 'none' }}
-      />
+      <Handle type="source" position={Position.Right} style={HANDLE_SOURCE_STYLE} />
     </div>
   )
 })
