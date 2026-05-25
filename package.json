@@ -27,7 +27,6 @@
     "zustand": "^4.5.4"
   },
   "devDependencies": {
-    "@esbuild/darwin-arm64": "^0.21.5",
     "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
