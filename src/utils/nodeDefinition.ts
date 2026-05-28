@@ -1308,6 +1308,99 @@ export const NODE_DEFINITIONS: Record<string, NodeDef> = {
     isComposite: false,
   },
 
+  f1: {
+    type: 'f1',
+    label: 'F1 Score',
+    category: NodeCategory.EVALUATION,
+    description: 'F1 score（二分类或多分类 macro/micro/weighted）',
+    params: {
+      metric_type: { type: 'string', default: 'f1', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  precision: {
+    type: 'precision',
+    label: 'Precision',
+    category: NodeCategory.EVALUATION,
+    description: '分类精确率',
+    params: {
+      metric_type: { type: 'string', default: 'precision', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  recall: {
+    type: 'recall',
+    label: 'Recall',
+    category: NodeCategory.EVALUATION,
+    description: '分类召回率',
+    params: {
+      metric_type: { type: 'string', default: 'recall', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  confusion_matrix: {
+    type: 'confusion_matrix',
+    label: 'Confusion Matrix',
+    category: NodeCategory.EVALUATION,
+    description: '分类混淆矩阵',
+    params: {
+      metric_type: { type: 'string', default: 'confusion_matrix', description: '指标类型' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  mean_iou: {
+    type: 'mean_iou',
+    label: 'Mean IoU',
+    category: NodeCategory.EVALUATION,
+    description: '语义分割平均交并比',
+    params: {
+      metric_type: { type: 'string', default: 'mean_iou', description: '指标类型' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  roc_auc: {
+    type: 'roc_auc',
+    label: 'ROC AUC',
+    category: NodeCategory.EVALUATION,
+    description: 'ROC 曲线下面积',
+    params: {
+      metric_type: { type: 'string', default: 'roc_auc', description: '指标类型' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
   // ============================================================
   // Custom
   // ============================================================
