@@ -1,23 +1,65 @@
 """
-POST /api/execute — 在本地 subprocess 执行训练代码
+POST /api/execute — 在本地 subprocess 执行后端生成的训练代码
 POST /api/execute/forward — 执行图的 forward pass，返回张量统计
 POST /api/execute/gradients — 分析图的梯度流
 
 所有路由共享 /api/execute 前缀。
 超时限制为 60 秒，超时后进程会被强制终止。
 """
+from __future__ import annotations
+
 from fastapi import APIRouter
 from pydantic import BaseModel
 from copy import deepcopy
+from pathlib import Path
+import ast
 import subprocess
 import tempfile
 import os
+import signal
 import sys
 
 from backend.services.dataflow_compiler import compile_dataflow
 from backend.services.unified_code_gen import generate
 
 router = APIRouter(prefix="/execute", tags=["execute"])
+
+EXECUTION_TIMEOUT_SECONDS = 60
+RAW_EXECUTION_ENV_FLAG = "FLOWHAMSTER_ALLOW_RAW_EXECUTE"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+ALLOWED_IMPORT_ROOTS = {
+    "__future__",
+    "backend",
+    "json",
+    "math",
+    "numpy",
+    "pandas",
+    "pathlib",
+    "sklearn",
+    "torch",
+    "torchmetrics",
+    "torchvision",
+    "typing",
+}
+ENV_ALLOWLIST = {
+    "APPDATA",
+    "CUDA_PATH",
+    "CUDA_VISIBLE_DEVICES",
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "PROGRAMFILES",
+    "PYTHONPATH",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TORCH_HOME",
+    "USER",
+    "USERPROFILE",
+    "USERNAME",
+    "VIRTUAL_ENV",
+    "WINDIR",
+}
 
 
 class ExecuteRequest(BaseModel):
@@ -60,6 +102,11 @@ class ExecuteResponse(BaseModel):
 
 def _build_executable_code(req: ExecuteRequest) -> str:
     if req.code is not None:
+        if os.getenv(RAW_EXECUTION_ENV_FLAG) != "1":
+            raise ValueError(
+                "Raw code execution is disabled. Submit graph/data_graph for backend-generated execution, "
+                f"or set {RAW_EXECUTION_ENV_FLAG}=1 only in a trusted local development environment."
+            )
         return req.code
 
     if req.graph is None:
@@ -91,6 +138,90 @@ def _build_executable_code(req: ExecuteRequest) -> str:
     return generate(req.graph, options=options)
 
 
+def _validate_allowed_imports(code: str) -> None:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        raise ValueError(f"Invalid Python syntax: {exc}") from exc
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            modules = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            if node.level:
+                raise ValueError("Relative imports are not allowed during execution.")
+            modules = [node.module or ""]
+        else:
+            continue
+
+        for module in modules:
+            root = module.split(".", 1)[0]
+            if root not in ALLOWED_IMPORT_ROOTS:
+                raise ValueError(f"Import '{root}' is not allowed during execution.")
+
+
+def _build_execution_env() -> dict[str, str]:
+    env = {key: value for key, value in os.environ.items() if key.upper() in ENV_ALLOWLIST}
+    python_path = str(REPO_ROOT)
+    if env.get("PYTHONPATH"):
+        python_path = os.pathsep.join([python_path, env["PYTHONPATH"]])
+    env["PYTHONPATH"] = python_path
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
+    return env
+
+
+def _limit_child_resources() -> None:
+    if os.name == "nt":
+        return
+    try:
+        import resource
+
+        resource.setrlimit(resource.RLIMIT_CPU, (EXECUTION_TIMEOUT_SECONDS + 5, EXECUTION_TIMEOUT_SECONDS + 5))
+        resource.setrlimit(resource.RLIMIT_AS, (2 * 1024 * 1024 * 1024, 2 * 1024 * 1024 * 1024))
+        resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
+    except Exception:
+        return
+
+
+def _terminate_process_tree(process: subprocess.Popen[str]) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        return
+    os.killpg(process.pid, signal.SIGKILL)
+
+
+def _run_python_script(script_path: Path, cwd: Path) -> tuple[int | None, str, str, bool]:
+    creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
+    process = subprocess.Popen(
+        [sys.executable, str(script_path)],
+        cwd=str(cwd),
+        env=_build_execution_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=creationflags,
+        start_new_session=os.name != "nt",
+        preexec_fn=None if os.name == "nt" else _limit_child_resources,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=EXECUTION_TIMEOUT_SECONDS)
+        return process.returncode, stdout, stderr, False
+    except subprocess.TimeoutExpired:
+        _terminate_process_tree(process)
+        stdout, stderr = process.communicate()
+        return None, stdout, stderr, True
+
+
 @router.post("", response_model=ExecuteResponse)
 async def execute_code(req: ExecuteRequest):
     """
@@ -104,32 +235,31 @@ async def execute_code(req: ExecuteRequest):
     """
     try:
         code = _build_executable_code(req)
+        _validate_allowed_imports(code)
     except Exception as e:
         return ExecuteResponse(success=False, output="", error=str(e))
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
-        f.write(code)
-        tmp_path = f.name
+    with tempfile.TemporaryDirectory(prefix="flowhamster_exec_") as tmp:
+        tmp_dir = Path(tmp)
+        script_path = tmp_dir / "main.py"
+        script_path.write_text(code, encoding="utf-8")
 
-    try:
-        result = subprocess.run(
-            [sys.executable, tmp_path],
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-        output = result.stdout + result.stderr
-        return ExecuteResponse(
-            success=result.returncode == 0,
-            output=output,
-            error=result.stderr if result.returncode != 0 else None,
-        )
-    except subprocess.TimeoutExpired:
-        return ExecuteResponse(success=False, output="", error="Execution timed out (60s limit)")
-    except Exception as e:
-        return ExecuteResponse(success=False, output="", error=str(e))
-    finally:
-        os.unlink(tmp_path)
+        try:
+            returncode, stdout, stderr, timed_out = _run_python_script(script_path, tmp_dir)
+            output = stdout + stderr
+            if timed_out:
+                return ExecuteResponse(
+                    success=False,
+                    output=output,
+                    error=f"Execution timed out ({EXECUTION_TIMEOUT_SECONDS}s limit)",
+                )
+            return ExecuteResponse(
+                success=returncode == 0,
+                output=output,
+                error=stderr if returncode != 0 else None,
+            )
+        except Exception as e:
+            return ExecuteResponse(success=False, output="", error=str(e))
 
 
 # ── Forward pass tensor preview ────────────────────────────────────────────────

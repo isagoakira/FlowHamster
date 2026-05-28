@@ -1,6 +1,7 @@
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -9,7 +10,7 @@ from backend.routers import execute
 
 
 class ExecuteRouterTest(unittest.TestCase):
-    def test_execute_route_runs_submitted_code(self):
+    def test_execute_route_rejects_raw_code_by_default(self):
         app = FastAPI()
         app.include_router(execute.router, prefix="/api")
         client = TestClient(app)
@@ -21,9 +22,43 @@ class ExecuteRouterTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.json()
+        self.assertFalse(body["success"])
+        self.assertEqual(body["output"], "")
+        self.assertIn("Raw code execution is disabled", body["error"])
+
+    def test_execute_route_runs_submitted_code_when_dev_switch_is_enabled(self):
+        app = FastAPI()
+        app.include_router(execute.router, prefix="/api")
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {execute.RAW_EXECUTION_ENV_FLAG: "1"}):
+            response = client.post(
+                "/api/execute",
+                json={"code": "print('flowhamster-execute-ok')", "target_device": "cpu"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
         self.assertTrue(body["success"])
         self.assertIn("flowhamster-execute-ok", body["output"])
         self.assertIsNone(body["error"])
+
+    def test_execute_route_blocks_disallowed_raw_imports_even_in_dev_mode(self):
+        app = FastAPI()
+        app.include_router(execute.router, prefix="/api")
+        client = TestClient(app)
+
+        with patch.dict("os.environ", {execute.RAW_EXECUTION_ENV_FLAG: "1"}):
+            response = client.post(
+                "/api/execute",
+                json={"code": "import os\nprint(os.getcwd())", "target_device": "cpu"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertFalse(body["success"])
+        self.assertEqual(body["output"], "")
+        self.assertIn("Import 'os' is not allowed", body["error"])
 
     def test_execute_route_runs_generated_dataflow_training_loop(self):
         app = FastAPI()

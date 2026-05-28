@@ -13,7 +13,7 @@ from pydantic import BaseModel
 router = APIRouter(prefix="/workflows", tags=["workflows"])
 
 # 工作流存储根目录
-WORKFLOWS_DIR = Path(__file__).parent.parent.parent / "workflows"
+WORKFLOWS_DIR = (Path(__file__).parent.parent.parent / "workflows").resolve()
 
 class WorkflowCreate(BaseModel):
     name: str
@@ -34,11 +34,32 @@ class WorkflowInfo(BaseModel):
 def get_workflow_dir(name: str) -> Path:
     """获取工作流目录路径（sanitized name）"""
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
-    return WORKFLOWS_DIR / safe_name
+    return _resolve_workflow_dir(safe_name, must_exist=False)
 
 def ensure_workflows_dir():
     """确保工作流根目录存在"""
     WORKFLOWS_DIR.mkdir(exist_ok=True)
+
+def _resolve_workflow_dir(workflow_id: str, *, must_exist: bool = True) -> Path:
+    """Resolve a workflow id to a directory guaranteed to stay under WORKFLOWS_DIR."""
+    if not workflow_id or workflow_id in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid workflow id")
+
+    candidate_id = Path(workflow_id)
+    if candidate_id.is_absolute() or any(part == ".." for part in candidate_id.parts):
+        raise HTTPException(status_code=400, detail="Invalid workflow id")
+
+    resolved = (WORKFLOWS_DIR / candidate_id).resolve()
+    try:
+        resolved.relative_to(WORKFLOWS_DIR)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid workflow id") from exc
+
+    if resolved == WORKFLOWS_DIR:
+        raise HTTPException(status_code=400, detail="Invalid workflow id")
+    if must_exist and not resolved.exists():
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return resolved
 
 def get_default_document(workflow_id: str, name: str, description: str) -> dict:
     """创建默认的工作流文档结构"""
@@ -133,9 +154,7 @@ async def create_workflow(workflow: WorkflowCreate):
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: str):
     """获取工作流完整文档"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = _resolve_workflow_dir(workflow_id)
 
     meta_file = wf_dir / "metadata.json"
     doc_file = wf_dir / "document.json"
@@ -153,9 +172,7 @@ async def get_workflow(workflow_id: str):
 @router.put("/{workflow_id}")
 async def update_workflow(workflow_id: str, update: WorkflowUpdate):
     """更新工作流"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = _resolve_workflow_dir(workflow_id)
 
     meta_file = wf_dir / "metadata.json"
     doc_file = wf_dir / "document.json"
@@ -196,9 +213,7 @@ async def update_workflow(workflow_id: str, update: WorkflowUpdate):
 @router.delete("/{workflow_id}")
 async def delete_workflow(workflow_id: str):
     """删除工作流"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = _resolve_workflow_dir(workflow_id)
 
     shutil.rmtree(wf_dir)
     return {"status": "ok"}
@@ -206,9 +221,7 @@ async def delete_workflow(workflow_id: str):
 @router.get("/{workflow_id}/document")
 async def get_workflow_document(workflow_id: str):
     """获取工作流文档（不含 metadata）"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = _resolve_workflow_dir(workflow_id)
 
     doc_file = wf_dir / "document.json"
     if not doc_file.exists():
@@ -219,9 +232,7 @@ async def get_workflow_document(workflow_id: str):
 @router.put("/{workflow_id}/document")
 async def save_workflow_document(workflow_id: str, document: dict):
     """保存完整工作流文档"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = _resolve_workflow_dir(workflow_id)
 
     doc_file = wf_dir / "document.json"
     meta_file = wf_dir / "metadata.json"
