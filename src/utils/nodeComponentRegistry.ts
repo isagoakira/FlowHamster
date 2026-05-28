@@ -42,6 +42,7 @@ import SplitNode from '../components/nodes/SplitNode'
 import SliceNode from '../components/nodes/SliceNode'
 import PermuteNode from '../components/nodes/PermuteNode'
 import SqueezeNode from '../components/nodes/SqueezeNode'
+import ExpandNode from '../components/nodes/ExpandNode'
 import ConstantNode from '../components/nodes/ConstantNode'
 import ParameterNode from '../components/nodes/ParameterNode'
 import SelfAttentionNode from '../components/nodes/SelfAttentionNode'
@@ -52,6 +53,8 @@ import TransformerDecoderNode from '../components/nodes/TransformerDecoderNode'
 import MambaNode from '../components/nodes/MambaNode'
 import CrossEntropyLossNode from '../components/nodes/CrossEntropyLossNode'
 import MSELossNode from '../components/nodes/MSELossNode'
+import FocalLossNode from '../components/nodes/FocalLossNode'
+import LabelSmoothingNode from '../components/nodes/LabelSmoothingNode'
 import AdamNode from '../components/nodes/AdamNode'
 import AdamWNode from '../components/nodes/AdamWNode'
 import SGDNode from '../components/nodes/SGDNode'
@@ -116,6 +119,7 @@ const NODE_COMPONENT_MAP: Record<string, React.ComponentType<any>> = {
   slice: SliceNode,
   permute: PermuteNode,
   squeeze: SqueezeNode,
+  expand: ExpandNode,
   constant: ConstantNode,
   parameter: ParameterNode,
 
@@ -130,6 +134,8 @@ const NODE_COMPONENT_MAP: Record<string, React.ComponentType<any>> = {
   // Loss
   crossentropyloss: CrossEntropyLossNode,
   mseloss: MSELossNode,
+  focalloss: FocalLossNode,
+  labelsmoothing: LabelSmoothingNode,
 
   // Optimizer
   adam: AdamNode,
@@ -144,6 +150,12 @@ const NODE_COMPONENT_MAP: Record<string, React.ComponentType<any>> = {
 
   // Evaluation
   accuracy: EvaluationNode,
+  f1: EvaluationNode,
+  precision: EvaluationNode,
+  recall: EvaluationNode,
+  confusion_matrix: EvaluationNode,
+  mean_iou: EvaluationNode,
+  roc_auc: EvaluationNode,
 
   // Custom
   custom: PackagedGroupNode,

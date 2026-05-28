@@ -781,8 +781,8 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
     }
     if (opType === 'squeeze') {
       const up = resolveSrc(Object.values(inputs).find((v): v is string => typeof v === 'string' && v !== null) ?? null, allBlocks)
-      const dim = fields.dim !== undefined ? `, dim=${fields.dim}` : ''
-      return `        ${outputVar} = ${up}.squeeze(${dim.slice(2)})`
+      const dim = fields.dim != null && fields.dim !== '' ? String(fields.dim) : ''
+      return `        ${outputVar} = ${up}.squeeze(${dim})`
     }
     if (opType === 'expand') {
       const up = resolveSrc(Object.values(inputs).find((v): v is string => typeof v === 'string' && v !== null) ?? null, allBlocks)
@@ -813,7 +813,7 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
       return `        ${outputVar} = ${upVar}.permute(${dimsStr})`
     }
     if (opType === 'squeeze') {
-      const dim = fields.dim !== undefined ? fields.dim : ''
+      const dim = fields.dim != null && fields.dim !== '' ? String(fields.dim) : ''
       return `        ${outputVar} = ${upVar}.squeeze(${dim})`
     }
     if (opType === 'flatten') return `        ${outputVar} = ${upVar}.flatten(start_dim=${fields.start_dim ?? 1})`
