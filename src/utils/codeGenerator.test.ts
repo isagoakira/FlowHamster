@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
 import { FlowHamsterEdge, FlowHamsterNode } from '../types/graph'
 import { LOCAL_TEMPLATES } from '../hooks/useTemplateStore'
 import { generateLocalCode } from './codeGenerator'
 import { WorkflowTrainingConfig } from '../schema/workflowDocument'
+import { registerCustomClass } from './customCompositeRegistry'
 
 function getTemplateGraph(templateId: string): { nodes: FlowHamsterNode[]; edges: FlowHamsterEdge[] } {
   const template = LOCAL_TEMPLATES.find((item) => item.id === templateId)
@@ -30,6 +31,10 @@ function getTemplateGraph(templateId: string): { nodes: FlowHamsterNode[]; edges
 }
 
 describe('codeGenerator', () => {
+  beforeEach(() => {
+    localStorage.removeItem('flowhamster_custom_composites')
+  })
+
   it('emits ViT transformer blocks as readable classes and instances', () => {
     const { nodes, edges } = getTemplateGraph('vit')
     const { code } = generateLocalCode(nodes, edges)
@@ -49,6 +54,103 @@ describe('codeGenerator', () => {
     expect(code).toContain('x_parameter_1 = self.x_parameter_1')
     expect(code).not.toMatch(/^\s*x_parameter_1 = nn\.Parameter\(/m)
     expect(code).toContain('x_add_1 = x_concat_1 + x_parameter_2')
+  })
+
+  it('emits all class definitions required by nested custom packages', () => {
+    const innerClass = registerCustomClass(
+      'InnerBlock',
+      'custom',
+      'other',
+      'pkg',
+      'inner',
+      [{ id: 'inner_relu', type: 'relu', label: 'InnerReLU', params: {} }],
+      [],
+      'inner_relu'
+    )
+    const outerClass = registerCustomClass(
+      'OuterBlock',
+      'custom',
+      'other',
+      'pkg',
+      'outer',
+      [
+        {
+          id: 'inner_instance',
+          type: 'custom',
+          label: 'inner_0',
+          params: {},
+          customClassId: innerClass.name,
+          data: {
+            nodeType: 'custom' as any,
+            label: 'inner_0',
+            params: {},
+            isComposite: true,
+            isCustomComposite: true,
+            customClassId: innerClass.name,
+            customClassRegistryId: innerClass.id,
+            isExpanded: false,
+            internalStructure: innerClass.internalStructure,
+            internalEdges: innerClass.internalEdges,
+            outputVar: innerClass.outputVar,
+            inputs: [],
+            outputs: [],
+            childNodeIds: ['inner_relu'],
+            internalEdgeIds: [],
+          },
+        },
+        { id: 'outer_relu', type: 'relu', label: 'OuterReLU', params: {} },
+      ],
+      [{ id: 'inner-to-outer', from: 'inner_instance', to: 'outer_relu' }],
+      'outer_relu'
+    )
+
+    const nodes: FlowHamsterNode[] = [
+      {
+        id: 'input',
+        type: 'inputNode',
+        position: { x: 0, y: 0 },
+        data: { nodeType: 'input', label: 'Input', params: {} },
+      },
+      {
+        id: 'outer_node',
+        type: 'customNode',
+        position: { x: 120, y: 0 },
+        data: {
+          nodeType: 'custom',
+          label: 'outer_0',
+          params: {},
+          isComposite: true,
+          isCustomComposite: true,
+          customClassId: outerClass.name,
+          customClassRegistryId: outerClass.id,
+          isExpanded: false,
+          internalStructure: outerClass.internalStructure,
+          internalEdges: outerClass.internalEdges,
+          outputVar: outerClass.outputVar,
+          inputs: [],
+          outputs: [],
+          childNodeIds: ['inner_instance', 'outer_relu'],
+          internalEdgeIds: ['inner-to-outer'],
+        },
+      },
+      {
+        id: 'output',
+        type: 'outputNode',
+        position: { x: 260, y: 0 },
+        data: { nodeType: 'output', label: 'Output', params: {} },
+      },
+    ]
+    const edges: FlowHamsterEdge[] = [
+      { id: 'input-to-outer', source: 'input', target: 'outer_node', sourceHandle: 'result', targetHandle: 'input_0' },
+      { id: 'outer-to-output', source: 'outer_node', target: 'output', sourceHandle: 'output_0', targetHandle: 'input' },
+    ]
+
+    const { code } = generateLocalCode(nodes, edges)
+
+    expect(code).toContain('class InnerBlock(nn.Module):')
+    expect(code).toContain('class OuterBlock(nn.Module):')
+    expect(code).toContain('self.inner_instance = InnerBlock()')
+    expect(code).toContain('self.x_outer_0 = OuterBlock()')
   })
 
   describe('composite loss handling', () => {

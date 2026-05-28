@@ -202,6 +202,56 @@ describe('useGraphStore - Package operations', () => {
       expect(innerModule.data.customClassId).toBe('Module_1')
       expect(innerModule.data.label).toBe('encoder_0')
     })
+
+    it('should route same-named internal handles through distinct package ports and restore them on unpackage', () => {
+      const extA = createNode('ext-a', 'input', 'ExtA', { x: 0, y: 0 })
+      const extB = createNode('ext-b', 'input', 'ExtB', { x: 0, y: 160 })
+      const branchA = createNode('branch-a', 'relu', 'BranchA', { x: 160, y: 0 })
+      const branchB = createNode('branch-b', 'relu', 'BranchB', { x: 160, y: 160 })
+      const join = createNode('join', 'add', 'Join', { x: 320, y: 80 })
+      const edges: FlowHamsterEdge[] = [
+        { id: 'in-a', source: 'ext-a', target: 'branch-a', sourceHandle: 'result', targetHandle: 'x' },
+        { id: 'in-b', source: 'ext-b', target: 'branch-b', sourceHandle: 'result', targetHandle: 'x' },
+        { id: 'a-join', source: 'branch-a', target: 'join', sourceHandle: 'result', targetHandle: 'a' },
+        { id: 'b-join', source: 'branch-b', target: 'join', sourceHandle: 'result', targetHandle: 'b' },
+      ]
+
+      act(() => {
+        useGraphStore.setState({
+          nodes: [extA, extB, branchA, branchB, join],
+          edges,
+          selectedNodeIds: ['branch-a', 'branch-b', 'join'],
+        })
+        useGraphStore.getState().packageSelection()
+      })
+
+      let state = useGraphStore.getState()
+      const pkgNode = state.nodes.find((node) => (node.data as any).isCustomComposite)!
+      const inputHandles = ((pkgNode.data as any).inputs as any[]).map((input) => input.handleId)
+      const redirectedInputHandles = state.edges
+        .filter((edge) => edge.target === pkgNode.id)
+        .map((edge) => edge.targetHandle)
+
+      expect(inputHandles).toHaveLength(2)
+      expect(new Set(inputHandles).size).toBe(2)
+      expect(new Set(redirectedInputHandles)).toEqual(new Set(inputHandles))
+
+      act(() => {
+        useGraphStore.getState().unpackageGroup(pkgNode.id)
+      })
+
+      state = useGraphStore.getState()
+      expect(state.edges.find((edge) => edge.id === 'in-a')).toMatchObject({
+        source: 'ext-a',
+        target: 'branch-a',
+        targetHandle: 'x',
+      })
+      expect(state.edges.find((edge) => edge.id === 'in-b')).toMatchObject({
+        source: 'ext-b',
+        target: 'branch-b',
+        targetHandle: 'x',
+      })
+    })
   })
 
   describe('addNode()', () => {

@@ -11,7 +11,7 @@ import {
 } from './nodeStyles'
 
 const ReLUNode = memo((props: NodeProps<NodeData>) => {
-  const { id, data } = props
+  const { id } = props
   const removeNode = (id: string) => { useGraphStore.getState().removeNode(id) }
   const [h, setH] = useState(false)
   return (

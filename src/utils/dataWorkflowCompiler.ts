@@ -490,6 +490,11 @@ function pythonValue(value: unknown): string {
   return String(value)
 }
 
+function pythonBool(value: unknown, fallback: boolean): string {
+  if (value === undefined || value === null) return fallback ? 'True' : 'False'
+  return value === true || value === 'true' ? 'True' : 'False'
+}
+
 function inferTensorExpression(field: string, taskType?: string): string {
   const lowered = field.toLowerCase()
   if (lowered.includes('label') || lowered.includes('target') || lowered.includes('class')) {
@@ -521,8 +526,8 @@ function getItemFallbackExpression(field: string, taskType?: string): string {
   const lowered = field.toLowerCase()
   if (lowered.includes('label') || lowered.includes('target') || lowered.includes('class')) {
     return taskType === 'regression'
-      ? 'torch.randn(1, 1)'
-      : 'torch.randint(0, 10, (1,), dtype=torch.long)'
+      ? 'torch.tensor(0.0, dtype=torch.float32)'
+      : 'torch.tensor(0, dtype=torch.long)'
   }
   if (lowered.includes('mask')) return 'torch.randint(0, 2, (1, 1, 224, 224), dtype=torch.long)'
   if (lowered.includes('token') || lowered.includes('text') || lowered.includes('ids')) {
@@ -599,29 +604,45 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
       const path = pythonValue(params.path || './data/train.csv')
       const delimiter = pythonValue(params.delimiter || ',')
       const id = safeToken(node.id)
+      const labelColumn = String(params.label_column ?? 'label').trim() || 'label'
+      const featureColumns = String(params.feature_columns ?? '')
+        .split(',')
+        .map((column) => column.trim())
+        .filter(Boolean)
+      const featureColumnsExpr = featureColumns.length > 0
+        ? `[${featureColumns.map((column) => pythonValue(column)).join(', ')}]`
+        : `[col for col in self._${id}_columns if col != self._${id}_label_column and col.lower() not in ('label', 'class', 'target')]`
       result.initCode.push(
         `        self._${id}_df = pd.read_csv(${path}, delimiter=${delimiter})`,
         `        self._${id}_columns = list(self._${id}_df.columns)`,
+        `        self._${id}_label_column = ${pythonValue(labelColumn)}`,
+        `        self._${id}_feature_columns = ${featureColumnsExpr}`,
         `        self._${id}_cache = {}`
       )
       result.getitemCode.push(
         `        # CSV Source: ${path}`,
-        `        row = self._${id}_df.iloc[index % len(self._${id}_df)]`,
-        `        for col in self._${id}_columns:`,
-        `            val = row[col]`,
-        `            if pd.isna(val): continue`,
-        `            # Try to convert to tensor if numeric`,
+        `        row = self._${id}_df.iloc[index % len(self._${id}_df)] if len(self._${id}_df) > 0 else {}`,
+        `        _field_data = row.to_dict() if hasattr(row, 'to_dict') else dict(row)`,
+        `        _feature_values = []`,
+        `        if self._${id}_label_column in row and not pd.isna(row[self._${id}_label_column]):`,
+        `            _field_label = int(float(row[self._${id}_label_column]))`,
+        `        for col in self._${id}_feature_columns:`,
+        `            numeric_val = 0.0`,
+        `            val = row[col] if col in row else None`,
+        `            if val is None or pd.isna(val):`,
+        `                _feature_values.append(numeric_val)`,
+        `                continue`,
         `            try:`,
         `                numeric_val = float(val)`,
-        `                if col.lower() in ('label', 'class', 'target'):`,
-        `                    _field_label = int(numeric_val)`,
-        `                else:`,
-        `                    locals()[f'_field_{col}'] = torch.tensor(numeric_val) if abs(numeric_val - int(numeric_val)) < 1e-9 else torch.tensor(float(val))`,
         `            except:`,
-        `                locals()[f'_field_{col}'] = str(val)`,
-        `            _field_names.append(f'_field_{col}')`
+        `                numeric_val = 0.0`,
+        `            _feature_values.append(numeric_val)`,
+        `            locals()[f'_field_{col}'] = torch.tensor(numeric_val, dtype=torch.float32)`,
+        `            _field_names.append(f'_field_{col}')`,
+        `        _field_features = torch.tensor(_feature_values, dtype=torch.float32) if _feature_values else torch.zeros(1, dtype=torch.float32)`
       )
       result.fieldTracking['label'] = '_field_label'
+      result.fieldTracking['features'] = '_field_features'
       result.fieldTracking['csv_row'] = '_field_data'
       break
     }
@@ -1470,9 +1491,9 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
     }
 
     case 'dataloader': {
-      const batchSize = Number(params.batch_size || 32)
+      const batchSize = Number(params.batch_size ?? 32)
       const shuffle = params.shuffle !== false
-      const numWorkers = Number(params.num_workers || 4)
+      const numWorkers = Number(params.num_workers ?? 4)
       const pinMemory = params.pin_memory !== false
       result.getitemCode.push(
         `        # DataLoader (batch_size=${batchSize}, shuffle=${shuffle}, num_workers=${numWorkers}, pin_memory=${pinMemory})`
@@ -1481,10 +1502,10 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
       result.initCode.push(
         `        self._dataloader_config_${safeToken(node.id)} = {`,
         `            'batch_size': ${batchSize},`,
-        `            'shuffle': ${shuffle},`,
+        `            'shuffle': ${pythonBool(shuffle, true)},`,
         `            'num_workers': ${numWorkers},`,
-        `            'pin_memory': ${pinMemory},`,
-        `            'drop_last': ${params.drop_last ?? false}`,
+        `            'pin_memory': ${pythonBool(pinMemory, true)},`,
+        `            'drop_last': ${pythonBool(params.drop_last, false)}`,
         `        }`
       )
       // Track dataloader output type
@@ -1584,6 +1605,41 @@ export function collectDataOutputFields(nodes: DataFlowNode[]): string[] {
   }
 
   return fields
+}
+
+function getSourceLengthExpression(node: DataFlowNode): string | null {
+  const id = safeToken(node.id)
+  switch (node.data.nodeType) {
+    case 'folder_source':
+      return `len(self._${id}_paths)`
+    case 'csv_source':
+    case 'parquet_source':
+      return `len(self._${id}_df)`
+    case 'huggingface_source':
+      return `len(self._${id}_dataset)`
+    default:
+      return null
+  }
+}
+
+function getDataLoaderConfig(nodes: DataFlowNode[], trainingConfig?: WorkflowTrainingConfig): string {
+  const loaderNode = nodes.find((node) => node.data.nodeType === 'dataloader')
+  const params = loaderNode?.data.params ?? {}
+  const batchSize = Number(params.batch_size ?? trainingConfig?.runtime?.batchSize ?? 1)
+  const shuffle = params.shuffle ?? true
+  const numWorkers = Number(params.num_workers ?? trainingConfig?.runtime?.numWorkers ?? 0)
+  const pinMemory = params.pin_memory ?? false
+  const dropLast = params.drop_last ?? false
+
+  return [
+    'DATALOADER_CONFIG = {',
+    `    'batch_size': ${batchSize},`,
+    `    'shuffle': ${pythonBool(shuffle, true)},`,
+    `    'num_workers': ${numWorkers},`,
+    `    'pin_memory': ${pythonBool(pinMemory, false)},`,
+    `    'drop_last': ${pythonBool(dropLast, false)},`,
+    '}',
+  ].join('\n')
 }
 
 function collectModelInputNames(nodes: FlowHamsterNode[]): string[] {
@@ -1697,8 +1753,21 @@ export function compileDataWorkflow(
   // 构建真正的 Dataset 类
   // Use outputFieldVars (from dataset_output node) to properly reference field variables set by getitem_code
   const datasetOutputFields = outputFieldVars.length > 0
-    ? outputFieldVars.map(line => line.trim().replace(/,\s*$/, '')).join(',\n')
-    : sampleFields.map((field) => `            ${JSON.stringify(field)}: ${getItemFallbackExpression(field, trainingConfig?.taskType)}`).join(',\n')
+    ? outputFieldVars.map((line) => {
+      const match = line.match(/^\s*"([^"]+)":\s*([^,]+),?\s*$/)
+      if (!match) return `${line.trim().replace(/,\s*$/, '')},`
+      const [, field, varName] = match
+      return `            ${JSON.stringify(field)}: locals().get(${JSON.stringify(varName)}, ${getItemFallbackExpression(field, trainingConfig?.taskType)}),`
+    }).join('\n')
+    : sampleFields.map((field) => `            ${JSON.stringify(field)}: ${getItemFallbackExpression(field, trainingConfig?.taskType)},`).join('\n')
+
+  const sourceLengthExpressions = sortedNodes
+    .map(getSourceLengthExpression)
+    .filter((expr): expr is string => Boolean(expr))
+  const datasetSizeLine = sourceLengthExpressions.length > 0
+    ? `        self._size = max(1, ${sourceLengthExpressions.join(', ')})`
+    : '        self._size = 1'
+  const dataLoaderConfigBlock = getDataLoaderConfig(sortedNodes, trainingConfig)
 
   // Collect required imports based on node types present
   const requiredImports = ['import torch']
@@ -1721,12 +1790,13 @@ export function compileDataWorkflow(
 class FlowHamsterDataset(torch.utils.data.Dataset):
     def __init__(self):
 ${allInitCode.join('\n')}
-        self._size = max(1, len(self._paths) if hasattr(self, '_paths') else 1)
+${datasetSizeLine}
 
     def __len__(self):
         return self._size
 
     def __getitem__(self, index):
+        _field_names = []
 ${allGetitemCode.join('\n')}
 
         # 构建输出字典，使用 node 填充的真实变量
@@ -1749,6 +1819,7 @@ ${bindingMapLines.join('\n')}
 }
 BOUND_TRAINING_TARGET = ${targetBindingSource ? JSON.stringify(targetBindingSource) : 'None'}
 PRIMARY_MODEL_INPUT_KEY = ${primaryModelInputKey ? JSON.stringify(primaryModelInputKey) : 'None'}
+${dataLoaderConfigBlock}
 
 ${hasRealDataPipeline ? realDatasetClass : `
 class FlowHamsterDataset(torch.utils.data.Dataset):
@@ -1766,13 +1837,33 @@ ${sampleFields.map((field) => `            ${JSON.stringify(field)}: ${getItemFa
 `}
 
 def build_demo_batch(device):
+    try:
+        loader = build_flowhamster_dataloader()
+        batch = next(iter(loader))
+        if isinstance(batch, dict):
+            return batch
+    except Exception as exc:
+        print(f"Data pipeline warning: {exc}")
+
+    return build_fallback_batch(device)
+
+def build_fallback_batch(device):
     return {
 ${sampleLines.join('\n')}
     }
 
+def build_flowhamster_dataset():
+    return FlowHamsterDataset()
+
+def build_flowhamster_dataloader():
+    dataset = build_flowhamster_dataset()
+    return torch.utils.data.DataLoader(dataset, **DATALOADER_CONFIG)
+
 def _coerce_bound_value(value, device):
     if torch.is_tensor(value):
         return value.to(device)
+    if isinstance(value, (int, float)):
+        return torch.tensor(value, device=device)
     return None
 
 def resolve_bound_inputs(batch, device):
@@ -1788,10 +1879,14 @@ def resolve_bound_inputs(batch, device):
 
     return model_feed, target
 
-def select_primary_model_input(model_feed, device):
+def select_primary_model_input(model_feed, device, batch_size=None):
     if PRIMARY_MODEL_INPUT_KEY and PRIMARY_MODEL_INPUT_KEY in model_feed:
         return model_feed[PRIMARY_MODEL_INPUT_KEY]
-    return torch.randn(1, 3, 224, 224, device=device)
+    for value in model_feed.values():
+        if torch.is_tensor(value):
+            return value
+    fallback_batch_size = int(batch_size) if batch_size else 1
+    return torch.randn(fallback_batch_size, 3, 224, 224, device=device)
 `.trim()
 
   return {

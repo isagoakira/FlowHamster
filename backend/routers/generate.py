@@ -19,7 +19,7 @@ Response:
 from fastapi import APIRouter
 from pydantic import BaseModel
 from backend.services.unified_code_gen import generate
-from backend.services.dataflow_compiler import compile_dataflow
+from backend.services.dataflow_compiler import CompiledDataflow, compile_dataflow
 
 router = APIRouter()
 
@@ -56,22 +56,27 @@ class GenerateResponse(BaseModel):
     warnings: list[str] = []
 
 
-def _build_workflow_scaffold(data_graph: dict | None, bindings: list[dict] | None, training_config: dict | None) -> str:
-    """构建数据流相关的 Python scaffold"""
+def _compile_workflow(
+    model_graph: dict | None,
+    data_graph: dict | None,
+    bindings: list[dict] | None,
+    training_config: dict | None,
+) -> CompiledDataflow | None:
+    """编译数据流相关的 Python scaffold。"""
     if not data_graph and not bindings:
-        return ""
+        return None
 
     compiled = compile_dataflow(
-        model_graph=None,
+        model_graph=model_graph,
         data_graph=data_graph,
         bindings=bindings,
         training_config=training_config,
     )
 
     if not compiled.has_workflow_runtime:
-        return ""
+        return None
 
-    return f"\n\n{compiled.python_scaffold}\n"
+    return compiled
 
 
 @router.post("/generate", response_model=GenerateResponse)
@@ -89,17 +94,21 @@ async def generate_code(req: GenerateRequest):
         options = dict(req.options or {})
         if req.training_config is not None:
             options["training_config"] = req.training_config
-        code = generate(req.graph, options=options)
 
-        # 如果有 data_graph 或 bindings，追加数据流 scaffold
-        workflow_scaffold = _build_workflow_scaffold(
+        warnings: list[str] = []
+        compiled_workflow = _compile_workflow(
+            req.graph,
             req.data_graph,
             req.bindings,
             req.training_config
         )
-        if workflow_scaffold:
-            code += workflow_scaffold
+        if compiled_workflow:
+            options["workflow_scaffold"] = compiled_workflow.python_scaffold
+            options["workflow_runtime"] = compiled_workflow.has_workflow_runtime
+            warnings.extend(compiled_workflow.warnings)
 
-        return GenerateResponse(success=True, code=code, warnings=[])
+        code = generate(req.graph, options=options)
+
+        return GenerateResponse(success=True, code=code, warnings=warnings)
     except Exception as e:
         return GenerateResponse(success=False, code=f"# Error: {e}", warnings=[str(e)])

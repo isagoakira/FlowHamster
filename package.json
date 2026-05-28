@@ -12,13 +12,13 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "vitest",
-    "test:run": "vitest run"
+    "test:run": "vitest run",
+    "smoke:training": "node smoke/runTrainingSmoke.mjs",
+    "smoke:training:gpu": "node smoke/runGpuTrainingSmoke.mjs"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
     "@tauri-apps/api": "^2.10.1",
-    "@types/dagre": "^0.7.54",
-    "dagre": "^0.8.5",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-syntax-highlighter": "^16.1.1",
@@ -27,7 +27,6 @@
     "zustand": "^4.5.4"
   },
   "devDependencies": {
-    "@esbuild/darwin-arm64": "^0.21.5",
     "@tauri-apps/cli": "^2.10.1",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",

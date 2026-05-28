@@ -4,8 +4,6 @@
  * Provides lookup for loss function classes and their custom implementations.
  */
 
-import { LossType } from '../schema/workflowDocument'
-
 /**
  * Returns the PyTorch loss class instantiation string for the given loss type
  */

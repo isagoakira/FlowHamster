@@ -133,31 +133,38 @@ function restoreCurrentBoundaryEdges(
   if (!boundaryEdges || boundaryEdges.length === 0) return []
 
   const restored: FlowHamsterEdge[] = []
-  // Track used boundary edges so each one maps to exactly one external edge.
-  // This prevents two external edges that share the same handle from both
-  // resolving to the same internal node (a silent data-loss bug).
-  const usedBoundaryEdges = new Set<string>()
+
+  const findMapping = (
+    direction: 'input' | 'output',
+    currentEdgeId: string,
+    currentGroupHandle?: string | null
+  ): BoundaryEdgeData | undefined => {
+    const candidates = boundaryEdges.filter((be) => be.direction === direction)
+
+    const exact = candidates.find((be) => be.originalEdgeId === currentEdgeId)
+    if (exact) return exact
+
+    if (currentGroupHandle) {
+      const byGroupHandle = candidates.find((be) => be.groupHandleId === currentGroupHandle)
+      if (byGroupHandle) return byGroupHandle
+
+      // Backward compatibility for packages created before groupHandleId was
+      // guaranteed to be a stable package-port ID.
+      const byInternalHandle = candidates.find((be) => be.internalHandle === currentGroupHandle)
+      if (byInternalHandle) return byInternalHandle
+    }
+
+    if (candidates.length === 1) return candidates[0]
+    return undefined
+  }
 
   for (const edge of allEdges) {
     if (edge.target === groupId) {
       // INPUT edge: external source -> group
       // 1. Exact edge ID match (stable, preferred)
-      let mapping = boundaryEdges.find(
-        (be) => be.direction === 'input' && be.originalEdgeId === edge.id && !usedBoundaryEdges.has(be.originalEdgeId)
-      )
-      // 2. Handle-based match using the ACTUAL edge targetHandle
-      if (!mapping && edge.targetHandle) {
-        mapping = boundaryEdges.find(
-          (be) => be.direction === 'input' && be.groupHandleId === edge.targetHandle && !usedBoundaryEdges.has(be.originalEdgeId)
-        )
-      }
-      // 3. Last resort: pick first unused input boundary edge
-      if (!mapping) {
-        mapping = boundaryEdges.find((be) => be.direction === 'input' && !usedBoundaryEdges.has(be.originalEdgeId))
-      }
+      const mapping = findMapping('input', edge.id, edge.targetHandle)
       if (!mapping) continue
 
-      usedBoundaryEdges.add(mapping.originalEdgeId)
       const internalNodeId = idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId
       const targetHandle = mapping.internalHandle !== 'default'
         ? mapping.internalHandle
@@ -173,22 +180,9 @@ function restoreCurrentBoundaryEdges(
     } else if (edge.source === groupId) {
       // OUTPUT edge: group -> external target
       // 1. Exact edge ID match (stable, preferred)
-      let mapping = boundaryEdges.find(
-        (be) => be.direction === 'output' && be.originalEdgeId === edge.id && !usedBoundaryEdges.has(be.originalEdgeId)
-      )
-      // 2. Handle-based match using the ACTUAL edge sourceHandle
-      if (!mapping && edge.sourceHandle) {
-        mapping = boundaryEdges.find(
-          (be) => be.direction === 'output' && be.groupHandleId === edge.sourceHandle && !usedBoundaryEdges.has(be.originalEdgeId)
-        )
-      }
-      // 3. Last resort: pick first unused output boundary edge
-      if (!mapping) {
-        mapping = boundaryEdges.find((be) => be.direction === 'output' && !usedBoundaryEdges.has(be.originalEdgeId))
-      }
+      const mapping = findMapping('output', edge.id, edge.sourceHandle)
       if (!mapping) continue
 
-      usedBoundaryEdges.add(mapping.originalEdgeId)
       const internalNodeId = idMap.get(mapping.internalNodeId) ?? mapping.internalNodeId
       const sourceHandle = mapping.internalHandle !== 'default'
         ? mapping.internalHandle
@@ -315,15 +309,13 @@ function inferBoundaryInfo(
     const isOutput = nodeIds.has(edge.source) && !nodeIds.has(edge.target)
 
     if (isInput) {
-      // Use the actual edge's targetHandle as the group handle ID
-      // This ensures restoreCurrentBoundaryEdges can match by handle
       const actualHandle = edge.targetHandle || 'input'
       let existingPort = inputPorts.find((port) => port.nodeId === edge.target && port.label === actualHandle)
       if (!existingPort) {
         const groupHandleId = `input_${inputPorts.length}`
         inputPorts.push({
           id: groupHandleId,
-          handleId: actualHandle,  // store actual handle as handleId
+          handleId: groupHandleId,
           label: actualHandle,
           nodeId: edge.target,
           edgeId: edge.id,
@@ -348,7 +340,7 @@ function inferBoundaryInfo(
         const groupHandleId = `output_${outputPorts.length}`
         outputPorts.push({
           id: groupHandleId,
-          handleId: actualHandle,
+          handleId: groupHandleId,
           label: actualHandle,
           nodeId: edge.source,
           edgeId: edge.id,

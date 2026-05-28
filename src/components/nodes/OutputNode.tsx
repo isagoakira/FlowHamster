@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import { BASE_NODE_STYLE, NODE_COLORS, HANDLE_TARGET_STYLE, HANDLE_SOURCE_STYLE, DELETE_BUTTON_STYLE } from './nodeStyles';import { Handle, Position, NodeProps } from 'reactflow'
+import { Handle, Position, NodeProps } from 'reactflow'
 import { NodeData } from '../../types/graph'
 import { useGraphStore } from '../../hooks/useGraphStore'
 
@@ -67,8 +67,12 @@ const OutputNode = memo((props: NodeProps<NodeData>) => {
       <div style={rs}>
         <span style={ls}>Name</span>
         <input
+          className="nodrag nowheel"
           style={is_}
           value={outputName}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
           onChange={(e) => setOutputName(e.target.value)}
           placeholder="e.g. logits"
         />
@@ -78,8 +82,12 @@ const OutputNode = memo((props: NodeProps<NodeData>) => {
       <div style={rs}>
         <span style={ls}>Type</span>
         <select
+          className="nodrag nowheel"
           style={sel_}
           value={outputType}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
           onChange={(e) => setOutputType(e.target.value)}
         >
           <option value="main">Main</option>

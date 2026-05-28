@@ -22,7 +22,7 @@ const LeakyReLUNode = memo((props: NodeProps<NodeData>) => {
       {h && <button onClick={(e) => { e.stopPropagation(); removeNode(id) }} style={DELETE_BUTTON_STYLE} title="Delete node">x</button>}
       <Handle type="target" position={Position.Left} style={HANDLE_TARGET_STYLE} />
       <div style={{ fontWeight: 600, fontSize: '12px', color: NODE_COLORS.layer, marginBottom: '6px', textTransform: 'uppercase' }}>LeakyReLU</div>
-      <div key="negative_slope" style={rs}><span style={ls}>negative_slope</span><input style={is_} value={String(p.negative_slope ?? "")} onChange={e => set("negative_slope", e.target.value)} type="number" /></div>      <Handle type="source" position={Position.Right} style={HANDLE_SOURCE_STYLE} />
+      <div key="negative_slope" style={rs}><span style={ls}>negative_slope</span><input className="nodrag nowheel" style={is_} value={String(p.negative_slope ?? "")} onPointerDown={(e) => e.stopPropagation()} onMouseDown={(e) => e.stopPropagation()} onWheel={(e) => e.stopPropagation()} onChange={e => set("negative_slope", e.target.value)} type="number" /></div>      <Handle type="source" position={Position.Right} style={HANDLE_SOURCE_STYLE} />
     </div>
   )
 })

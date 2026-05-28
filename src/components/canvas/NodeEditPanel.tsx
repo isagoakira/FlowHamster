@@ -194,6 +194,10 @@ const codeTextareaStyle: React.CSSProperties = {
   resize: 'vertical',
 }
 
+function stopCanvasInteraction(event: React.SyntheticEvent) {
+  event.stopPropagation()
+}
+
 const structItemStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'center',
@@ -217,11 +221,13 @@ interface NodeEditPanelProps {
 }
 
 export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps) {
+  const liveNode = useGraphStore((s) => s.nodes.find((n) => n.id === node.id))
   const updateNodeData = useGraphStore((s) => s.updateNodeData)
   const updateNodeLabel = useGraphStore((s) => s.updateNodeLabel)
   const renamePackageClass = useGraphStore((s) => s.renamePackageClass)
-  const [label, setLabel] = useState(node.data.label)
-  const [className, setClassName] = useState((node.data as CustomCompositeNodeData).customClassId ?? '')
+  const currentNode = liveNode ?? node
+  const [label, setLabel] = useState(currentNode.data.label)
+  const [className, setClassName] = useState((currentNode.data as CustomCompositeNodeData).customClassId ?? '')
   const [customCode, setCustomCode] = useState('')
   const [showCode, setShowCode] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -229,10 +235,10 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   const [importError, setImportError] = useState<string | null>(null)
   const [showCompositeViewer, setShowCompositeViewer] = useState(false)
 
-  const nodeType = node.data.nodeType
-  const params = node.data.params || {}
+  const nodeType = currentNode.data.nodeType
+  const params = currentNode.data.params || {}
   const paramConfig = NODE_PARAM_CONFIGS[nodeType] || []
-  const isPackagedCustom = Boolean((node.data as CustomCompositeNodeData).isCustomComposite)
+  const isPackagedCustom = Boolean((currentNode.data as CustomCompositeNodeData).isCustomComposite)
   const isCustomModule = nodeType === 'custom' && !isPackagedCustom
 
   // Find composite node definition if this is a composite node
@@ -243,12 +249,12 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   const isCompositeNode = !!compositeDef
 
   useEffect(() => {
-    setLabel(node.data.label)
-  }, [node.data.label])
+    setLabel(currentNode.data.label)
+  }, [currentNode.data.label])
 
   useEffect(() => {
-    setClassName((node.data as CustomCompositeNodeData).customClassId ?? '')
-  }, [node.data])
+    setClassName((currentNode.data as CustomCompositeNodeData).customClassId ?? '')
+  }, [currentNode.data])
 
   useEffect(() => {
     if (isCustomModule && params.custom_code) {
@@ -258,21 +264,21 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   }, [isCustomModule])
 
   const handleParamChange = (key: string, value: any) => {
-    updateNodeData(node.id, {
+    updateNodeData(currentNode.id, {
       params: { ...params, [key]: value }
     })
   }
 
   const handleLabelChange = () => {
-    if (label.trim() && label !== node.data.label) {
-      updateNodeLabel(node.id, label.trim())
+    if (label.trim() && label !== currentNode.data.label) {
+      updateNodeLabel(currentNode.id, label.trim())
     }
   }
 
   const handleClassNameChange = () => {
-    const currentClassName = (node.data as CustomCompositeNodeData).customClassId
+    const currentClassName = (currentNode.data as CustomCompositeNodeData).customClassId
     if (className.trim() && currentClassName && className.trim() !== currentClassName) {
-      renamePackageClass(node.id, className.trim())
+      renamePackageClass(currentNode.id, className.trim())
     }
   }
 
@@ -296,7 +302,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
           parsedParams[p.name] = null
         }
       })
-      updateNodeData(node.id, {
+      updateNodeData(currentNode.id, {
         params: { ...params, custom_code: code, ...parsedParams }
       })
     } else {
@@ -338,7 +344,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
   const color = getNodeColor(nodeType)
 
   return (
-    <div style={panelStyle}>
+    <div style={panelStyle} onPointerDown={stopCanvasInteraction} onMouseDown={stopCanvasInteraction} onWheel={stopCanvasInteraction}>
       <div style={headerStyle}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ width: 12, height: 12, borderRadius: 3, background: color }} />
@@ -368,6 +374,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
 	            Instance Name
 	          </label>
           <input
+            className="nodrag nowheel"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             onBlur={handleLabelChange}
@@ -386,6 +393,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
 	              Class Name
 	            </label>
 	            <input
+                className="nodrag nowheel"
 	              value={className}
 	              onChange={(e) => setClassName(e.target.value)}
 	              onBlur={handleClassNameChange}
@@ -444,6 +452,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
                   </button>
                 </div>
                 <textarea
+                  className="nodrag nowheel"
                   value={customCode}
                   onChange={(e) => setCustomCode(e.target.value)}
                   placeholder={"class CustomModule(nn.Module):\n  def __init__(self):\n    ...\n  def forward(self, x):\n    ..."}
@@ -532,6 +541,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
                 <span style={{ fontSize: 12, color: '#888' }}>{config.label}</span>
                 {config.type === 'boolean' ? (
                   <input
+                    className="nodrag nowheel"
                     type="checkbox"
                     checked={!!params[config.key]}
                     onChange={(e) => handleParamChange(config.key, e.target.checked)}
@@ -539,6 +549,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
                   />
                 ) : config.type === 'text' ? (
                   <textarea
+                    className="nodrag nowheel"
                     value={String(params[config.key] ?? '')}
                     onChange={(e) => handleParamChange(config.key, e.target.value)}
                     style={{
@@ -549,6 +560,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
                   />
                 ) : (
                   <input
+                    className="nodrag nowheel"
                     type="number"
                     value={params[config.key] as number ?? config.default}
                     onChange={(e) => {
@@ -576,6 +588,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
             </label>
             {showCode && (
               <textarea
+                className="nodrag nowheel"
                 value={customCode}
                 onChange={(e) => setCustomCode(e.target.value)}
                 placeholder="# Enter custom module code..."
@@ -614,7 +627,7 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
         {/* 模块信息 */}
         <div style={{ ...sectionStyle, borderBottom: 'none' }}>
           <div style={{ fontSize: 10, color: '#555', lineHeight: 1.8 }}>
-            <div><span style={{ color: '#666' }}>ID:</span> {node.id}</div>
+            <div><span style={{ color: '#666' }}>ID:</span> {currentNode.id}</div>
             <div><span style={{ color: '#666' }}>Type:</span> {nodeType}</div>
             <div><span style={{ color: '#666' }}>Output:</span> {NODE_REGISTRY.flatMap(cat => cat.nodes).find(n => n.type === nodeType)?.outputType || 'Tensor'}</div>
           </div>
@@ -625,10 +638,10 @@ export default memo(function NodeEditPanel({ node, onClose }: NodeEditPanelProps
       {isCompositeNode && compositeDef && (
         <CompositeNodeViewer
           isOpen={showCompositeViewer}
-          nodeId={node.id}
+          nodeId={currentNode.id}
           onClose={() => setShowCompositeViewer(false)}
           nodeType={nodeType}
-          nodeLabel={node.data.label}
+          nodeLabel={currentNode.data.label}
           subModules={compositeDef.internalStructure}
           internalEdges={compositeDef.internalEdges}
           outputVar={compositeDef.outputVar}

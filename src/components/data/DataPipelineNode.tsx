@@ -1,4 +1,4 @@
-import { memo, useState, useCallback } from 'react'
+import { memo, useState, useCallback, type SyntheticEvent } from 'react'
 import { Handle, NodeProps, Position } from 'reactflow'
 import { DataNodeData, FieldSpec, FieldDtype } from '../../types/dataGraph'
 import { useDataGraphStore } from '../../hooks/useDataGraphStore'
@@ -61,6 +61,10 @@ function parseFieldSpecs(fieldSpecsStr: string): FieldSpec[] {
 // Serialize field specs to JSON
 function serializeFieldSpecs(specs: FieldSpec[]): string {
   return JSON.stringify(specs)
+}
+
+function stopCanvasInteraction(event: SyntheticEvent) {
+  event.stopPropagation()
 }
 
 const DataPipelineNode = memo((props: NodeProps<DataNodeData>) => {
@@ -178,8 +182,12 @@ const DataPipelineNode = memo((props: NodeProps<DataNodeData>) => {
         <div key={field} style={rs}>
           <span style={ls}>{field}</span>
           <input
+            className="nodrag nowheel"
             style={is_}
             value={String(data.params[field] ?? '')}
+            onPointerDown={stopCanvasInteraction}
+            onMouseDown={stopCanvasInteraction}
+            onWheel={stopCanvasInteraction}
             onChange={(e) => setField(field, e.target.value)}
           />
         </div>
@@ -209,7 +217,11 @@ const DataPipelineNode = memo((props: NodeProps<DataNodeData>) => {
                 <div key={spec.name} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px' }}>
                   <span style={{ color: '#ccc', minWidth: '50px' }}>{spec.name}</span>
                   <select
+                    className="nodrag nowheel"
                     value={spec.dtype}
+                    onPointerDown={stopCanvasInteraction}
+                    onMouseDown={stopCanvasInteraction}
+                    onWheel={stopCanvasInteraction}
                     onChange={(e) => updateFieldSpec(spec.name, e.target.value as FieldDtype, spec.shapeHint)}
                     style={{
                       background: '#0f1318',
@@ -232,8 +244,12 @@ const DataPipelineNode = memo((props: NodeProps<DataNodeData>) => {
                     <option value="spectrogram">spectrogram</option>
                   </select>
                   <input
+                    className="nodrag nowheel"
                     value={spec.shapeHint || ''}
                     placeholder="N,C,H,W"
+                    onPointerDown={stopCanvasInteraction}
+                    onMouseDown={stopCanvasInteraction}
+                    onWheel={stopCanvasInteraction}
                     onChange={(e) => updateFieldSpec(spec.name, spec.dtype, e.target.value || undefined)}
                     style={{
                       background: '#0f1318',

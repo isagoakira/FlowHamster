@@ -29,10 +29,10 @@ export const DATA_NODE_CATEGORIES: { [key: string]: DataNodeCategory } = {
       {
         type: 'csv_source',
         label: 'CSV Source',
-        description: 'Read tabular metadata from CSV',
+        description: 'Read tabular features and labels from CSV',
         category: 'sources',
-        defaultParams: { path: './data/train.csv', delimiter: ',' },
-        fieldOrder: ['path', 'delimiter'],
+        defaultParams: { path: './data/train.csv', delimiter: ',', feature_columns: 'f0,f1,f2,f3', label_column: 'label' },
+        fieldOrder: ['path', 'delimiter', 'feature_columns', 'label_column'],
       },
       {
         type: 'jsonl_source',

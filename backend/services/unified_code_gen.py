@@ -1065,6 +1065,63 @@ LOSS_CLASS_MAP = {
     "contrastive": "ContrastiveLoss()",
 }
 
+LOSS_SPATIAL_TYPES = {"segmentation", "dice", "lovasz", "tversky", "iou", "giou", "dice_ce"}
+LOSS_CLASSIFICATION_TYPES = {
+    "cross_entropy",
+    "label_smoothing",
+    "focal",
+    "focal_loss",
+    "class_balanced",
+    "detection",
+    "nlp",
+}
+
+FLOWHAMSTER_LOSS_INPUT_HELPER = '''
+def flowhamster_prepare_loss_inputs(primary_output, target, loss_type="cross_entropy", task_type="classification"):
+    if not torch.is_tensor(primary_output):
+        return primary_output, target
+
+    loss_type = str(loss_type or "cross_entropy").lower()
+    task_type = str(task_type or "classification").lower()
+    class_loss_types = {"cross_entropy", "label_smoothing", "focal", "focal_loss", "class_balanced", "detection", "nlp"}
+    spatial_loss_types = {"segmentation", "dice", "lovasz", "tversky", "iou", "giou", "dice_ce"}
+
+    if torch.is_tensor(target):
+        target = target.to(primary_output.device)
+
+    if loss_type in {"mse", "regression", "waveform"}:
+        if torch.is_tensor(target):
+            target = target.float()
+            if target.shape != primary_output.shape and target.numel() == primary_output.numel():
+                target = target.reshape_as(primary_output)
+        return primary_output, target
+
+    is_class_loss = loss_type in class_loss_types or task_type in {"classification", "segmentation"}
+    if is_class_loss:
+        if torch.is_tensor(target):
+            target = target.long()
+            if primary_output.dim() > 2 and target.dim() == 1 and task_type != "segmentation" and loss_type not in spatial_loss_types:
+                primary_output = primary_output.flatten(2).mean(dim=2)
+            elif primary_output.dim() > 2 and target.dim() == primary_output.dim() and target.shape[1] == 1:
+                target = target.squeeze(1)
+            elif primary_output.dim() <= 2 and target.dim() > 1:
+                target = target.reshape(target.shape[0], -1)
+                if target.shape[1] == 1:
+                    target = target.squeeze(1)
+        elif primary_output.dim() > 2 and task_type != "segmentation" and loss_type not in spatial_loss_types:
+            primary_output = primary_output.flatten(2).mean(dim=2)
+
+    if torch.is_tensor(target) and primary_output.dim() > 0 and target.dim() > 0 and target.shape[0] != primary_output.shape[0]:
+        out_batch = primary_output.shape[0]
+        if target.shape[0] > out_batch:
+            target = target[:out_batch]
+        elif target.shape[0] > 0:
+            repeats = (out_batch + target.shape[0] - 1) // target.shape[0]
+            target = target.repeat((repeats,) + (1,) * (target.dim() - 1))[:out_batch]
+
+    return primary_output, target
+'''
+
 LOSS_CUSTOM_CLASSES = {
     "dice": '''
 class DiceLoss(nn.Module):
@@ -1150,47 +1207,76 @@ class DiceCELoss(nn.Module):
 }
 
 
-def _gen_training_from_config(config: dict | None) -> tuple[list[str], list[str]]:
+def _gen_training_from_config_sections(config: dict | None) -> tuple[list[str], list[str], list[str]]:
     """
     Generate training code from training config.
-    Returns a tuple of (custom_class_lines, training_lines).
+    Returns a tuple of (custom_class_lines, setup_lines, step_lines).
     """
     if not config:
-        return [], []
+        return [], [], []
 
     custom_class_lines: list[str] = []
-    lines: list[str] = []
+    setup_lines: list[str] = []
+    loss_lines: list[str] = []
+    step_lines: list[str] = []
     loss_cfg = config.get("loss", {}) or {}
     optimizer_cfg = config.get("optimizer", {}) or {}
     scheduler_cfg = config.get("scheduler", {}) or {}
     runtime_cfg = config.get("runtime", {}) or {}
-    task_type = config.get("taskType", "classification")
 
-    loss_type = loss_cfg.get("type", "cross_entropy")
+    raw_loss_type = loss_cfg.get("type", "cross_entropy")
+    loss_type = (
+        loss_cfg.get("params", {}).get("lossType", "cross_entropy")
+        if raw_loss_type == "single"
+        else raw_loss_type
+    )
+    task_type = str(config.get("taskType", "classification") or "classification")
 
-    if loss_cfg.get("type") == "composite":
+    def _target_line_for(loss_name: str) -> str:
+        normalized = str(loss_name or "cross_entropy").lower()
+        if normalized in {"mse", "regression", "waveform"}:
+            return "        target = torch.randn_like(primary_output)"
+        if normalized in LOSS_SPATIAL_TYPES or task_type == "segmentation":
+            return "        target = torch.randint(0, primary_output.shape[1] if primary_output.dim() > 1 else 10, (primary_output.shape[0], *primary_output.shape[2:]), dtype=torch.long, device=primary_output.device)"
+        return "        target = torch.randint(0, max(2, primary_output.shape[1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)"
+
+    def _prepare_loss_line(loss_name: str) -> str:
+        return f"    loss_input, loss_target = flowhamster_prepare_loss_inputs(primary_output, target, loss_type={_py_repr(str(loss_name or 'cross_entropy'))}, task_type={_py_repr(task_type)})"
+
+    if loss_cfg.get("enabled", True):
+        custom_class_lines.append(FLOWHAMSTER_LOSS_INPUT_HELPER)
+
+    if raw_loss_type == "composite":
         components = loss_cfg.get("params", {}).get("components", [])
+        component_types = [str(comp.get("type", "cross_entropy") or "cross_entropy") for comp in components]
+        prepare_loss_type = next(
+            (name for name in component_types if name in LOSS_CLASSIFICATION_TYPES or name in LOSS_SPATIAL_TYPES),
+            component_types[0] if component_types else "cross_entropy",
+        )
         for i, comp in enumerate(components):
             comp_type = comp.get("type", "cross_entropy")
             comp_class = LOSS_CLASS_MAP.get(comp_type, "nn.CrossEntropyLoss()")
             if comp_type in LOSS_CUSTOM_CLASSES:
                 custom_class_lines.append(LOSS_CUSTOM_CLASSES[comp_type])
-            lines.append(f"    loss_fn_{i} = {comp_class}")
+            setup_lines.append(f"    loss_fn_{i} = {comp_class}")
         loss_exprs = []
         for i, comp in enumerate(components):
             weight = comp.get("weight", 1.0)
-            loss_exprs.append(f"{weight} * loss_fn_{i}(primary_output, target)")
-        lines.append(f"    loss = {' + '.join(loss_exprs)}")
-        lines.append("    target = torch.randint(0, max(2, primary_output.shape[-1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)")
+            loss_exprs.append(f"{weight} * loss_fn_{i}(loss_input, loss_target)")
+        if loss_exprs:
+            loss_lines.append("    if target is None:")
+            loss_lines.append(_target_line_for(prepare_loss_type))
+            loss_lines.append(_prepare_loss_line(prepare_loss_type))
+            loss_lines.append(f"    loss = {' + '.join(loss_exprs)}")
     elif loss_cfg.get("enabled", True):
         if loss_type in LOSS_CUSTOM_CLASSES:
             custom_class_lines.append(LOSS_CUSTOM_CLASSES[loss_type])
         loss_class = LOSS_CLASS_MAP.get(loss_type, "nn.CrossEntropyLoss()")
-        lines.append(f"    loss_fn = {loss_class}")
-        if loss_type in ("mse",):
-            lines.append("    target = torch.randn_like(primary_output)")
-        else:
-            lines.append("    target = torch.randint(0, max(2, primary_output.shape[-1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)")
+        setup_lines.append(f"    loss_fn = {loss_class}")
+        loss_lines.append("    if target is None:")
+        loss_lines.append(_target_line_for(str(loss_type)))
+        loss_lines.append(_prepare_loss_line(str(loss_type)))
+        loss_lines.append("    loss = loss_fn(loss_input, loss_target)")
 
     if optimizer_cfg.get("enabled", True):
         optimizer_type = optimizer_cfg.get("type", "adamw")
@@ -1198,13 +1284,13 @@ def _gen_training_from_config(config: dict | None) -> tuple[list[str], list[str]
         param_str = ", ".join(f"{key}={_py_repr(value)}" for key, value in optimizer_params.items())
         suffix = f", {param_str}" if param_str else ""
         if optimizer_type == "adam":
-            lines.append(f"    optimizer = torch.optim.Adam(model.parameters(){suffix})")
+            setup_lines.append(f"    optimizer = torch.optim.Adam(model.parameters(){suffix})")
         elif optimizer_type == "sgd":
-            lines.append(f"    optimizer = torch.optim.SGD(model.parameters(){suffix})")
+            setup_lines.append(f"    optimizer = torch.optim.SGD(model.parameters(){suffix})")
         elif optimizer_type == "rmsprop":
-            lines.append(f"    optimizer = torch.optim.RMSprop(model.parameters(){suffix})")
+            setup_lines.append(f"    optimizer = torch.optim.RMSprop(model.parameters(){suffix})")
         else:
-            lines.append(f"    optimizer = torch.optim.AdamW(model.parameters(){suffix})")
+            setup_lines.append(f"    optimizer = torch.optim.AdamW(model.parameters(){suffix})")
 
     if scheduler_cfg.get("enabled"):
         scheduler_type = scheduler_cfg.get("type", "cosine_annealing")
@@ -1213,32 +1299,50 @@ def _gen_training_from_config(config: dict | None) -> tuple[list[str], list[str]
         prefix = "optimizer"
         args = f"{prefix}, {param_str}" if param_str else prefix
         if scheduler_type in ("step_lr", "steplr"):
-            lines.append(f"    scheduler = torch.optim.lr_scheduler.StepLR({args})")
+            setup_lines.append(f"    scheduler = torch.optim.lr_scheduler.StepLR({args})")
         elif scheduler_type in ("reduce_on_plateau", "reducelronplateau"):
-            lines.append(f"    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau({args})")
+            setup_lines.append(f"    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau({args})")
         else:
-            lines.append(f"    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR({args})")
+            setup_lines.append(f"    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR({args})")
 
     if loss_cfg.get("enabled", True) and optimizer_cfg.get("enabled", True):
-        lines.append("    model.train()")
-        lines.append("    optimizer.zero_grad()")
-        if loss_cfg.get("type") != "composite":
-            lines.append("    loss = loss_fn(primary_output, target)")
-        lines.append("    loss.backward()")
+        has_explicit_loss = any(line.strip().startswith("loss = ") for line in loss_lines)
+        step_lines.append("    model.train()")
+        step_lines.append("    optimizer.zero_grad()")
+        step_lines.extend(loss_lines)
+        if not has_explicit_loss:
+            step_lines.append(_prepare_loss_line(str(loss_type)))
+            step_lines.append("    loss = loss_fn(loss_input, loss_target)")
+        step_lines.append("    loss.backward()")
         grad_clip = runtime_cfg.get("gradClip")
         if grad_clip is not None:
-            lines.append(f"    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm={grad_clip})")
-        lines.append("    optimizer.step()")
+            step_lines.append(f"    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm={grad_clip})")
+        step_lines.append("    optimizer.step()")
         if scheduler_cfg.get("enabled"):
             if scheduler_cfg.get("type") in ("reduce_on_plateau", "reducelronplateau"):
-                lines.append("    scheduler.step(loss)")
+                step_lines.append("    scheduler.step(loss)")
             else:
-                lines.append("    scheduler.step()")
-        lines.append(
-            f"    print(f\"task={task_type}, epochs={runtime_cfg.get('epochs', 10)}, batch_size={runtime_cfg.get('batchSize', 32)}, device={{device}}\")"
-        )
+                step_lines.append("    scheduler.step()")
 
-    return custom_class_lines, lines
+    return custom_class_lines, setup_lines, step_lines
+
+
+def _gen_training_from_config(config: dict | None) -> tuple[list[str], list[str]]:
+    """
+    Backward-compatible training code generator.
+    Returns custom class definitions and a one-shot setup+step block.
+    """
+    custom_class_lines, setup_lines, step_lines = _gen_training_from_config_sections(config)
+    return custom_class_lines, setup_lines + step_lines
+
+
+def _indent_lines(lines: list[str], spaces: int) -> str:
+    prefix = " " * spaces
+    return "\n".join(f"{prefix}{line}" if line.strip() else line for line in lines)
+
+
+def _without_legacy_training_summary(lines: list[str]) -> list[str]:
+    return [line for line in lines if not line.strip().startswith('print(f"task=')]
 
 
 # ─────────────────────────────────────────────────────────────────
@@ -1358,6 +1462,8 @@ class FlowHamsterModel(nn.Module):
         # Training code
         training_main_lines: list[str] = []
         custom_class_lines: list[str] = []
+        training_setup_lines: list[str] = []
+        training_step_lines: list[str] = []
         training_enabled = opts.get("training_nodes", False)
         if training_enabled:
             training_blocks_for_main = [b for b in self.sorted_blocks if b.category == "training"]
@@ -1376,8 +1482,8 @@ class FlowHamsterModel(nn.Module):
                     lines = [line.replace(f"optimizer_{block.output_var}", scheduler_optimizer) for line in lines]
                 training_main_lines.extend(lines)
         elif training_config:
-            custom_class_lines, training_lines = _gen_training_from_config(training_config)
-            training_main_lines.extend(training_lines)
+            custom_class_lines, training_setup_lines, training_step_lines = _gen_training_from_config_sections(training_config)
+            training_main_lines.extend(training_setup_lines + training_step_lines)
 
         needs_targets = len([b for b in self.sorted_blocks if b.category == "evaluation"]) > 0
         targets_placeholder = "    # Placeholder labels (replace with real dataset labels)\n    y_true = torch.randint(0, 10, (1,))" if needs_targets else ""
@@ -1390,6 +1496,73 @@ class FlowHamsterModel(nn.Module):
         is_multi = "return (" in fwd_block and fwd_block.strip().endswith(")")
         primary_output_line = "    primary_output = output[0]" if is_multi else "    primary_output = output"
         device_name = training_config.get("runtime", {}).get("device", "cpu") if isinstance(training_config, dict) else "cpu"
+        workflow_scaffold = str(opts.get("workflow_scaffold") or "").strip()
+        workflow_runtime = bool(opts.get("workflow_runtime")) and bool(workflow_scaffold)
+        workflow_scaffold_block = f"\n{workflow_scaffold}\n" if workflow_runtime else ""
+
+        if workflow_runtime and isinstance(training_config, dict):
+            runtime_cfg = training_config.get("runtime", {}) or {}
+            epochs = runtime_cfg.get("epochs", 1)
+            if epochs is None:
+                epochs = 1
+            setup_block = "\n".join(training_setup_lines)
+            step_lines = _without_legacy_training_summary(training_step_lines)
+            if not step_lines:
+                step_lines = ["    loss = torch.tensor(float('nan'), device=runtime_device)"]
+            step_block = _indent_lines(step_lines, 8)
+            primary_output_loop_line = _indent_lines([primary_output_line], 8)
+            main_block = f"""
+if __name__ == "__main__":
+    model = FlowHamsterModel()
+    device = "{device_name}"
+    model = model.to(device if device != "auto" else "cpu")
+    runtime_device = device if device != "auto" else "cpu"
+{setup_block + chr(10) if setup_block else ""}    loader = build_flowhamster_dataloader()
+    for epoch in range({epochs}):
+        for step, batch in enumerate(loader, start=1):
+            model_feed, target = resolve_bound_inputs(batch, runtime_device)
+            x = select_primary_model_input(model_feed, runtime_device, target.shape[0] if torch.is_tensor(target) and target.dim() > 0 else None)
+            output = model(x)
+{primary_output_loop_line}
+{step_block}
+            print(f"epoch={{epoch + 1}}, step={{step}}, batch_size={{x.shape[0] if hasattr(x, 'shape') and x.dim() > 0 else 1}}, output={{tuple(primary_output.shape) if hasattr(primary_output, 'shape') else type(primary_output).__name__}}, loss={{loss.item() if hasattr(loss, 'item') else loss}}, device={{runtime_device}}")
+{targets_placeholder}{eval_block}
+"""
+        elif workflow_runtime:
+            main_block = f"""
+if __name__ == "__main__":
+    model = FlowHamsterModel()
+    device = "{device_name}"
+    model = model.to(device if device != "auto" else "cpu")
+    runtime_device = device if device != "auto" else "cpu"
+    batch = build_demo_batch(runtime_device)
+    model_feed, target = resolve_bound_inputs(batch, runtime_device)
+    x = select_primary_model_input(model_feed, runtime_device, target.shape[0] if torch.is_tensor(target) and target.dim() > 0 else None)
+    output = model(x)
+{primary_output_line}
+    if isinstance(output, tuple):
+        print(f"output: {{[tuple(t.shape) if hasattr(t, 'shape') else type(t).__name__ for t in output]}}")
+    else:
+        print(f"output: {{output.shape}}")
+{targets_placeholder}{training_block}{eval_block}
+"""
+        else:
+            main_block = f"""
+if __name__ == "__main__":
+    model = FlowHamsterModel()
+    device = "{device_name}"
+    model = model.to(device if device != "auto" else "cpu")
+    runtime_device = device if device != "auto" else "cpu"
+    x = torch.randn(1, 3, 224, 224, device=runtime_device)
+    target = None
+    output = model(x)
+{primary_output_line}
+    if isinstance(output, tuple):
+        print(f"output: {{[tuple(t.shape) if hasattr(t, 'shape') else type(t).__name__ for t in output]}}")
+    else:
+        print(f"output: {{output.shape}}")
+{targets_placeholder}{training_block}{eval_block}
+"""
 
         return f"""# Generated by FlowHamster
 # DO NOT EDIT — Regenerated from graph editor
@@ -1408,19 +1581,8 @@ class FlowHamsterModel(nn.Module):
     def forward(self, x):
 {fwd_block}
 
-
-if __name__ == "__main__":
-    model = FlowHamsterModel()
-    device = "{device_name}"
-    model = model.to(device if device != "auto" else "cpu")
-    x = torch.randn(1, 3, 224, 224, device=device if device != "auto" else "cpu")
-    output = model(x)
-{primary_output_line}
-    if isinstance(output, tuple):
-        print(f"output: {{[tuple(t.shape) if hasattr(t, 'shape') else type(t).__name__ for t in output]}}")
-    else:
-        print(f"output: {{output.shape}}")
-{targets_placeholder}{training_block}{eval_block}
+{workflow_scaffold_block}
+{main_block}
 """
 
 

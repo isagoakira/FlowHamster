@@ -3,7 +3,7 @@
  * Covers: graph pruning, edge handling, block name generation
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { buildAST } from './astBuilder'
 import { FlowHamsterNode, FlowHamsterEdge } from '../types/graph'
 
@@ -76,6 +76,7 @@ describe('astBuilder', () => {
 
       const addBlock = result.blocks.find(b => b.nodeId === 'add')
       expect(addBlock).toBeDefined()
+      if (!addBlock) throw new Error('Expected add block to be generated')
       // Both inputs should be captured (one in 'a', one in 'b')
       expect((addBlock.inputs as any).a).toBeTruthy()
       expect((addBlock.inputs as any).b).toBeTruthy()
@@ -186,6 +187,7 @@ describe('astBuilder', () => {
 
       // Isolated nodes get pruned - need to use connected graph
       // This test verifies the param propagation when nodes ARE included
+      expect(result.blocks).toHaveLength(0)
     })
   })
 

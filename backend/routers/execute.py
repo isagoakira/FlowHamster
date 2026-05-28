@@ -8,11 +8,16 @@ POST /api/execute/gradients — 分析图的梯度流
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
+from copy import deepcopy
 import subprocess
 import tempfile
 import os
+import sys
 
-router = APIRouter(prefix="/api/execute", tags=["execute"])
+from backend.services.dataflow_compiler import compile_dataflow
+from backend.services.unified_code_gen import generate
+
+router = APIRouter(prefix="/execute", tags=["execute"])
 
 
 class ExecuteRequest(BaseModel):
@@ -20,14 +25,22 @@ class ExecuteRequest(BaseModel):
     本地代码执行请求
 
     Attributes:
-        code: 要执行的 Python 代码字符串
+        code: 要执行的 Python 代码字符串（兼容旧调用）
+        graph: 可选，模型节点图；提供时后端会生成训练脚本并执行
+        data_graph: 可选，数据节点图
+        bindings: 可选，数据字段到模型输入 / 训练 target 的绑定
+        training_config: 可选，训练配置
         input_shape: 可选，输入张量的形状，用于 forward pass 预览
-        target_device: 执行设备，"cpu" 或 "cuda"（默认 "cpu"）
+        target_device: 可选执行设备，提供时覆盖 training_config.runtime.device
         data_loader_config: 可选，数据加载器配置
     """
-    code: str
+    code: str | None = None
+    graph: dict | None = None
+    data_graph: dict | None = None
+    bindings: list[dict] | None = None
+    training_config: dict | None = None
     input_shape: list[int] | None = None
-    target_device: str = "cpu"  # "cpu" or "cuda"
+    target_device: str | None = None  # "cpu" or "cuda"
     data_loader_config: dict | None = None
 
 
@@ -45,7 +58,40 @@ class ExecuteResponse(BaseModel):
     error: str | None = None
 
 
-@router.post("/execute", response_model=ExecuteResponse)
+def _build_executable_code(req: ExecuteRequest) -> str:
+    if req.code is not None:
+        return req.code
+
+    if req.graph is None:
+        raise ValueError("Either code or graph must be provided.")
+
+    training_config = deepcopy(req.training_config) if isinstance(req.training_config, dict) else req.training_config
+    if req.target_device:
+        if training_config is None:
+            training_config = {"runtime": {"device": req.target_device}}
+        else:
+            runtime = training_config.setdefault("runtime", {})
+            runtime["device"] = req.target_device
+
+    options: dict = {}
+    if training_config is not None:
+        options["training_config"] = training_config
+
+    if req.data_graph or req.bindings:
+        compiled = compile_dataflow(
+            model_graph=req.graph,
+            data_graph=req.data_graph,
+            bindings=req.bindings,
+            training_config=training_config,
+        )
+        if compiled.has_workflow_runtime:
+            options["workflow_scaffold"] = compiled.python_scaffold
+            options["workflow_runtime"] = compiled.has_workflow_runtime
+
+    return generate(req.graph, options=options)
+
+
+@router.post("", response_model=ExecuteResponse)
 async def execute_code(req: ExecuteRequest):
     """
     在本地 subprocess 中执行 Python 代码。
@@ -56,14 +102,18 @@ async def execute_code(req: ExecuteRequest):
     Returns:
         ExecuteResponse: 包含执行结果
     """
-async def execute_code(req: ExecuteRequest):
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
-        f.write(req.code)
+    try:
+        code = _build_executable_code(req)
+    except Exception as e:
+        return ExecuteResponse(success=False, output="", error=str(e))
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
+        f.write(code)
         tmp_path = f.name
 
     try:
         result = subprocess.run(
-            ["python", tmp_path],
+            [sys.executable, tmp_path],
             capture_output=True,
             text=True,
             timeout=60,

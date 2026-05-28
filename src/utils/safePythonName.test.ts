@@ -5,9 +5,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { safePythonName } from './pythonNodeRegistry'
-import { normalizeNameToken } from './astBuilder'
 
-// Re-export normalizeNameToken for testing - it's not exported, so we test indirectly
 // We test via the behavior of codeGenerator which uses it
 
 describe('safePythonName', () => {

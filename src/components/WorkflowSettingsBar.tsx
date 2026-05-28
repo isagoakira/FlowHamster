@@ -7,7 +7,7 @@ import { memo, useMemo } from 'react'
 import { useGraphStore } from '../hooks/useGraphStore'
 import { useDataGraphStore } from '../hooks/useDataGraphStore'
 import { WorkflowTrainingConfig } from '../schema/workflowDocument'
-import { validateBindingCompatibility } from '../utils/dataWorkflowCompiler'
+import { compileDataWorkflow, validateBindingCompatibility } from '../utils/dataWorkflowCompiler'
 
 const barStyle: React.CSSProperties = {
   height: '48px',
@@ -84,15 +84,16 @@ function WorkflowSettingsBar({ onOpenDataWorkflow }: WorkflowSettingsBarProps) {
   const bindings = useGraphStore((s) => s.bindings)
   const modelNodes = useGraphStore((s) => s.nodes)
   const dataNodes = useDataGraphStore((s) => s.nodes)
+  const dataEdges = useDataGraphStore((s) => s.edges)
 
   // Validate bindings for errors/warnings
   const bindingValidation = useMemo(() => {
-    if (bindings.length === 0) return { errors: 0, warnings: 0 }
     const validations = validateBindingCompatibility(bindings, dataNodes as any, modelNodes as any)
+    const compiled = compileDataWorkflow(modelNodes as any, dataNodes as any, dataEdges as any, bindings, trainingConfig)
     const errors = validations.filter(v => !v.isCompatible && v.error).length
-    const warnings = validations.filter(v => !v.isCompatible && v.warning && !v.error).length
+    const warnings = validations.filter(v => !v.isCompatible && v.warning && !v.error).length + compiled.warnings.length
     return { errors, warnings }
-  }, [bindings, dataNodes, modelNodes])
+  }, [bindings, dataNodes, dataEdges, modelNodes, trainingConfig])
 
   const updateConfig = (updater: (current: WorkflowTrainingConfig) => WorkflowTrainingConfig) => {
     setTrainingConfig(updater(trainingConfig))

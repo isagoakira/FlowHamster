@@ -30,7 +30,7 @@ import {
   genReusableCompositeClasses,
   shouldEmitCompositeAsClass,
 } from './codeEmitter'
-import { genTrainingConfigCode } from './trainingConfigGen'
+import { FLOWHAMSTER_LOSS_INPUT_HELPER, genTrainingConfigCode } from './trainingConfigGen'
 
 // Re-export for backwards compatibility
 export { pruneGraph } from './graphPruner'
@@ -49,6 +49,15 @@ export interface GenerateWorkflowOptions {
   dataGraphNodes?: DataFlowNode[]
   dataGraphEdges?: DataFlowEdge[]
   bindings?: WorkflowBinding[]
+}
+
+function indentPythonLines(lines: string[], spaces: number): string {
+  const prefix = ' '.repeat(spaces)
+  return lines.map((line) => (line.trim() ? `${prefix}${line}` : line)).join('\n')
+}
+
+function removeLegacyTrainingSummary(lines: string[]): string[] {
+  return lines.filter((line) => !line.trim().startsWith('print(f"task='))
 }
 
 export function generateLocalCode(
@@ -206,7 +215,7 @@ export function generateLocalCode(
     ? `    runtime_device = device if device != "auto" else "cpu"
     batch = build_demo_batch(runtime_device)
     model_feed, target = resolve_bound_inputs(batch, runtime_device)
-    x = select_primary_model_input(model_feed, runtime_device)`
+    x = select_primary_model_input(model_feed, runtime_device, target.shape[0] if torch.is_tensor(target) and target.dim() > 0 else None)`
     : `    runtime_device = device if device != "auto" else "cpu"
     target = None
     x = torch.randn(1, 3, 224, 224, device=runtime_device)`
@@ -233,8 +242,27 @@ export function generateLocalCode(
     const lossCompute = lossFwdLines.join('\n')
     const evalBlock = evalLines.length > 0 ? `\n${evalLines.join('\n')}` : ''
     const configSetup = configDrivenTraining?.setupLines.join('\n') ?? ''
-    const configTrain = configDrivenTraining?.trainLines.join('\n') ?? ''
-    mainBlock = `
+    const configTrainLines = removeLegacyTrainingSummary(configDrivenTraining?.trainLines ?? [])
+    const configTrain = configTrainLines.join('\n')
+    if (configDrivenTraining && dataWorkflow.hasWorkflowRuntime) {
+      mainBlock = `
+if __name__ == "__main__":
+    model = FlowHamsterModel()
+    device = "${trainingConfig?.runtime?.device ?? 'cpu'}"
+    model = model.to(device if device != "auto" else "cpu")
+    runtime_device = device if device != "auto" else "cpu"
+${configSetup ? `${configSetup}\n` : ''}    loader = build_flowhamster_dataloader()
+    for epoch in range(${trainingConfig?.runtime?.epochs ?? 1}):
+        for step, batch in enumerate(loader, start=1):
+            model_feed, target = resolve_bound_inputs(batch, runtime_device)
+            x = select_primary_model_input(model_feed, runtime_device, target.shape[0] if torch.is_tensor(target) and target.dim() > 0 else None)
+            ${returnVarsDecl}
+${indentPythonLines([primaryOutputLine], 8)}
+${indentPythonLines(configTrainLines, 8)}
+            print(f"epoch={epoch + 1}, step={step}, batch_size={x.shape[0] if hasattr(x, 'shape') and x.dim() > 0 else 1}, output={tuple(primary_output.shape) if hasattr(primary_output, 'shape') else type(primary_output).__name__}, loss={loss.item() if hasattr(loss, 'item') else loss}, device={runtime_device}")
+`
+    } else {
+      mainBlock = `
 if __name__ == "__main__":
     model = FlowHamsterModel()
     device = "${trainingConfig?.runtime?.device ?? 'cpu'}"
@@ -247,6 +275,7 @@ ${configTrain ? `${configTrain}` : ''}${lossCompute ? `${configTrain ? '\n' : ''
 ${targetsPlaceholderLine ? `${targetsPlaceholderLine}` : ''}${evalBlock}
     print(f"${outputReturnVars.length > 1 ? outputReturnVars.map(v => `${v}: {${v}.shape}`).join(', ') : `output: {output.shape}`}" + ${lossFwdLines.length > 0 || Boolean(configDrivenTraining) ? `f", loss: {loss.item()}"` : `""`})
 `
+    }
   } else {
     mainBlock = `
 if __name__ == "__main__":
@@ -268,6 +297,7 @@ ${workflowRuntimePrelude}
     ? `\n\n${dataWorkflow.pythonScaffold}\n`
     : '\n'
   const reusableClassesBlock = genReusableCompositeClasses(modelBlocks).join('\n\n')
+  const lossInputHelperBlock = configDrivenTraining ? `\n${FLOWHAMSTER_LOSS_INPUT_HELPER}\n` : ''
 
   // Collect custom composite class definitions
   const customClasses = getAllCustomClasses()
@@ -280,9 +310,15 @@ ${workflowRuntimePrelude}
       if (sub.customClassId) {
         customClassIdsUsed.add(sub.customClassId)
       }
+      if (sub.data?.customClassId) {
+        customClassIdsUsed.add(sub.data.customClassId)
+      }
       // Also recursively check nested internalStructure
       if (sub.internalStructure) {
         collectFromInternalStructure(sub.internalStructure)
+      }
+      if (sub.data?.internalStructure) {
+        collectFromInternalStructure(sub.data.internalStructure)
       }
       // Check if sub.type is 'custom' and has customClassId in its own data
       if (sub.type === 'custom' && sub.customClassId) {
@@ -322,6 +358,7 @@ ${workflowRuntimePrelude}
     moduleImports,
     reusableClassesBlock,
     customClassesBlock,
+    lossInputHelperBlock,
     `class FlowHamsterModel(nn.Module):`,
     `    def __init__(self):`,
     `        super().__init__()`,

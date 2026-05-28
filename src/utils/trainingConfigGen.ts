@@ -8,6 +8,55 @@
 import { WorkflowTrainingConfig } from '../schema/workflowDocument'
 import { getLossClass, getLossSetupCode } from './lossRegistry'
 
+const SPATIAL_LOSS_TYPES = new Set(['segmentation', 'dice', 'lovasz', 'tversky', 'iou', 'giou', 'dice_ce'])
+const CLASSIFICATION_LOSS_TYPES = new Set(['cross_entropy', 'label_smoothing', 'focal', 'focal_loss', 'class_balanced', 'detection', 'nlp'])
+
+export const FLOWHAMSTER_LOSS_INPUT_HELPER = `
+def flowhamster_prepare_loss_inputs(primary_output, target, loss_type="cross_entropy", task_type="classification"):
+    if not torch.is_tensor(primary_output):
+        return primary_output, target
+
+    loss_type = str(loss_type or "cross_entropy").lower()
+    task_type = str(task_type or "classification").lower()
+    class_loss_types = {"cross_entropy", "label_smoothing", "focal", "focal_loss", "class_balanced", "detection", "nlp"}
+    spatial_loss_types = {"segmentation", "dice", "lovasz", "tversky", "iou", "giou", "dice_ce"}
+
+    if torch.is_tensor(target):
+        target = target.to(primary_output.device)
+
+    if loss_type in {"mse", "regression", "waveform"}:
+        if torch.is_tensor(target):
+            target = target.float()
+            if target.shape != primary_output.shape and target.numel() == primary_output.numel():
+                target = target.reshape_as(primary_output)
+        return primary_output, target
+
+    is_class_loss = loss_type in class_loss_types or task_type in {"classification", "segmentation"}
+    if is_class_loss:
+        if torch.is_tensor(target):
+            target = target.long()
+            if primary_output.dim() > 2 and target.dim() == 1 and task_type != "segmentation" and loss_type not in spatial_loss_types:
+                primary_output = primary_output.flatten(2).mean(dim=2)
+            elif primary_output.dim() > 2 and target.dim() == primary_output.dim() and target.shape[1] == 1:
+                target = target.squeeze(1)
+            elif primary_output.dim() <= 2 and target.dim() > 1:
+                target = target.reshape(target.shape[0], -1)
+                if target.shape[1] == 1:
+                    target = target.squeeze(1)
+        elif primary_output.dim() > 2 and task_type != "segmentation" and loss_type not in spatial_loss_types:
+            primary_output = primary_output.flatten(2).mean(dim=2)
+
+    if torch.is_tensor(target) and primary_output.dim() > 0 and target.dim() > 0 and target.shape[0] != primary_output.shape[0]:
+        out_batch = primary_output.shape[0]
+        if target.shape[0] > out_batch:
+            target = target[:out_batch]
+        elif target.shape[0] > 0:
+            repeats = (out_batch + target.shape[0] - 1) // target.shape[0]
+            target = target.repeat((repeats,) + (1,) * (target.dim() - 1))[:out_batch]
+
+    return primary_output, target
+`.trim()
+
 /**
  * Formats a JavaScript value into a Python-compatible string representation
  */
@@ -21,6 +70,21 @@ export function formatPythonValue(value: unknown): string {
   return String(value)
 }
 
+function getTargetLine(lossType: string, taskType: string): string {
+  const normalized = lossType || 'cross_entropy'
+  if (['mse', 'regression', 'waveform'].includes(normalized)) {
+    return '        target = torch.randn_like(primary_output)'
+  }
+  if (SPATIAL_LOSS_TYPES.has(normalized) || taskType === 'segmentation') {
+    return '        target = torch.randint(0, primary_output.shape[1] if primary_output.dim() > 1 else 10, (primary_output.shape[0], *primary_output.shape[2:]), dtype=torch.long, device=primary_output.device)'
+  }
+  return '        target = torch.randint(0, max(2, primary_output.shape[1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)'
+}
+
+function getPrepareLossLine(lossType: string, taskType: string): string {
+  return `    loss_input, loss_target = flowhamster_prepare_loss_inputs(primary_output, target, loss_type='${lossType || 'cross_entropy'}', task_type='${taskType || 'classification'}')`
+}
+
 /**
  * Generates setup and training loop lines from a WorkflowTrainingConfig
  */
@@ -29,6 +93,7 @@ export function genTrainingConfigCode(
 ): { setupLines: string[]; trainLines: string[] } {
   const setupLines: string[] = []
   const trainLines: string[] = []
+  const lossLines: string[] = []
   const optimizerParamEntries = Object.entries(config.optimizer.params || {})
     .map(([key, value]) => `${key}=${formatPythonValue(value)}`)
     .join(', ')
@@ -38,6 +103,7 @@ export function genTrainingConfigCode(
   const actualLossType = config.loss.type === 'single'
     ? String(config.loss.params?.lossType || 'cross_entropy')
     : config.loss.type
+  const taskType = config.taskType || 'classification'
 
   // Handle composite loss
   if (config.loss.type === 'composite') {
@@ -78,16 +144,21 @@ export function genTrainingConfigCode(
       }
     }
     // Build weighted sum expression
+    const componentTypes = components.map((comp) => String(comp.type || 'cross_entropy'))
+    const prepareLossType = componentTypes.find((type) => CLASSIFICATION_LOSS_TYPES.has(type) || SPATIAL_LOSS_TYPES.has(type))
+      || componentTypes[0]
+      || 'cross_entropy'
     const lossExprs = components.map((comp, i) => {
       if (comp.type === 'custom' && comp.customCode) {
-        return `${comp.weight} * custom_loss_fn_${i}(primary_output, target)`
+        return `${comp.weight} * custom_loss_fn_${i}(loss_input, loss_target)`
       }
-      return `${comp.weight} * loss_fn_${i}(primary_output, target)`
+      return `${comp.weight} * loss_fn_${i}(loss_input, loss_target)`
     })
     setupLines.push(`    # Weighted: ${components.map(c => `${c.weight}×${c.type}`).join(' + ')}`)
-    trainLines.push('    if target is None:')
-    trainLines.push('        target = torch.randint(0, max(2, primary_output.shape[-1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)')
-    trainLines.push(`    loss = ${lossExprs.join(' + ')}`)
+    lossLines.push('    if target is None:')
+    lossLines.push(getTargetLine(prepareLossType, taskType))
+    lossLines.push(getPrepareLossLine(prepareLossType, taskType))
+    lossLines.push(`    loss = ${lossExprs.join(' + ')}`)
     }
   }
   // Handle single custom loss
@@ -99,22 +170,22 @@ export function genTrainingConfigCode(
         setupLines.push(`    ${trimmed}`)
       }
     }
-    trainLines.push('    if target is None:')
-    trainLines.push('        target = torch.randint(0, max(2, primary_output.shape[-1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)')
-    trainLines.push('    loss = loss_fn(primary_output, target)')
+    lossLines.push('    if target is None:')
+    lossLines.push(getTargetLine(actualLossType, taskType))
+    lossLines.push(getPrepareLossLine(actualLossType, taskType))
+    lossLines.push('    loss = loss_fn(loss_input, loss_target)')
   }
   // Handle single predefined loss
   else {
-    const taskType = config.taskType || 'classification'
     let lossClass = getLossClass(actualLossType)
-    let targetLine = '        target = torch.randint(0, max(2, primary_output.shape[-1] if primary_output.dim() > 1 else 2), (primary_output.shape[0],), dtype=torch.long, device=primary_output.device)'
+    let targetLine = getTargetLine(actualLossType, taskType)
 
     // Handle loss-specific target generation and setup
     switch (actualLossType) {
       case 'mse':
       case 'waveform':
         lossClass = 'nn.MSELoss()'
-        targetLine = '        target = torch.randn_like(primary_output)'
+        targetLine = getTargetLine('mse', taskType)
         break
       case 'bce':
       case 'bce_logits':
@@ -145,15 +216,15 @@ export function genTrainingConfigCode(
         break
       case 'regression':
         lossClass = 'nn.MSELoss()'
-        targetLine = '        target = torch.randn_like(primary_output)'
+        targetLine = getTargetLine('regression', taskType)
         break
       default:
         // Keep default loss class, use taskType-based target if classification
         if (taskType === 'regression') {
           lossClass = 'nn.MSELoss()'
-          targetLine = '        target = torch.randn_like(primary_output)'
+          targetLine = getTargetLine('regression', taskType)
         } else if (taskType === 'segmentation') {
-          targetLine = '        target = torch.randint(0, primary_output.shape[1] if primary_output.dim() > 1 else 10, (primary_output.shape[0], *primary_output.shape[2:]), dtype=torch.long, device=primary_output.device)'
+          targetLine = getTargetLine(actualLossType, taskType)
         }
         break
     }
@@ -166,9 +237,10 @@ export function genTrainingConfigCode(
       }
     }
     setupLines.push(`    loss_fn = ${lossClass}`)
-    trainLines.push('    if target is None:')
-    trainLines.push(targetLine)
-    trainLines.push('    loss = loss_fn(primary_output, target)')
+    lossLines.push('    if target is None:')
+    lossLines.push(targetLine)
+    lossLines.push(getPrepareLossLine(actualLossType, taskType))
+    lossLines.push('    loss = loss_fn(loss_input, loss_target)')
   }
 
   switch (config.optimizer.type) {
@@ -210,9 +282,15 @@ export function genTrainingConfigCode(
     }
   }
 
+  const hasExplicitLossComputation = lossLines.some((line) => line.trim().startsWith('loss = '))
+
   trainLines.push('    model.train()')
   trainLines.push('    optimizer.zero_grad()')
-  trainLines.push('    loss = loss_fn(primary_output, target)')
+  trainLines.push(...lossLines)
+  if (!hasExplicitLossComputation) {
+    trainLines.push(getPrepareLossLine(actualLossType, taskType))
+    trainLines.push('    loss = loss_fn(loss_input, loss_target)')
+  }
   trainLines.push('    loss.backward()')
   if (config.runtime.gradClip !== null) {
     trainLines.push(`    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=${config.runtime.gradClip})`)

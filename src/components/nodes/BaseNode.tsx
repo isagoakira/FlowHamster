@@ -67,8 +67,12 @@ export const BaseNode = memo(({ id, data }: BaseNodeProps) => {
           <div key={key} style={PARAM_ROW_STYLE}>
             <span style={PARAM_LABEL_STYLE}>{key}</span>
             <input
+              className="nodrag nowheel"
               style={PARAM_INPUT_STYLE}
               value={String(val)}
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onWheel={(e) => e.stopPropagation()}
               onChange={(e) => handleParamChange(key, e.target.value)}
               type={typeof val === 'number' ? 'number' : 'text'}
             />

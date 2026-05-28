@@ -3,7 +3,7 @@ import { useGraphStore } from '../../hooks/useGraphStore'
 import { useDataGraphStore } from '../../hooks/useDataGraphStore'
 import { useAutoLayout } from '../../hooks/useAutoLayout'
 import { generateLocalCode } from '../../utils/codeGenerator'
-import { exportNotebook, downloadFile } from '../../utils/api'
+import { exportNotebook, downloadFile, executeWorkflow } from '../../utils/api'
 import { useTensorExecutor } from '../../hooks/useTensorExecutor'
 import { getExecutableGraph } from '../../utils/graphStructure'
 import { API_BASE_URL } from '../../utils/runtimeConfig'
@@ -27,6 +27,7 @@ import {
   activeBtnStyle,
   settingsBtnStyle,
   dangerBtn,
+  trainingPanelStyle,
 } from './styles/toolbarSharedStyles'
 
 export function Toolbar() {
@@ -73,6 +74,10 @@ export function Toolbar() {
   const [showAllOutputs, setShowAllOutputs] = useState(false)
   const [showWorkflowDialog, setShowWorkflowDialog] = useState(false)
   const [showTrainingDashboard, setShowTrainingDashboard] = useState(false)
+  const [showWorkflowOutput, setShowWorkflowOutput] = useState(false)
+  const [workflowOutput, setWorkflowOutput] = useState('')
+  const [workflowExecutionError, setWorkflowExecutionError] = useState<string | null>(null)
+  const [workflowExecutionLoading, setWorkflowExecutionLoading] = useState(false)
   const [gradientMode, setGradientMode] = useState(false)
 
   const workflowStore = useWorkflowStore()
@@ -237,11 +242,38 @@ export function Toolbar() {
     }
   }, [buildCurrentDocument, trainingConfig])
 
+  const handleExecuteCurrentWorkflow = useCallback(async () => {
+    setWorkflowExecutionLoading(true)
+    setWorkflowExecutionError(null)
+    setWorkflowOutput('')
+    setShowWorkflowOutput(true)
+    try {
+      const result = await executeWorkflow(
+        store.nodes as any,
+        store.edges as any,
+        trainingConfig,
+        {
+          dataGraphNodes: dataNodes as any,
+          dataGraphEdges: dataEdges as any,
+          bindings,
+        },
+        trainingConfig.runtime?.device ?? 'cpu'
+      )
+      setWorkflowOutput(result.output || '')
+      setWorkflowExecutionError(result.success ? null : (result.error || 'Workflow execution failed.'))
+    } catch (error) {
+      setWorkflowExecutionError(error instanceof Error ? error.message : 'Backend not available.')
+    } finally {
+      setWorkflowExecutionLoading(false)
+    }
+  }, [store.nodes, store.edges, trainingConfig, dataNodes, dataEdges, bindings])
+
   const closeAllPanels = () => {
     setShowSettings(false)
     setShowTrainingConfig(false)
     setShowBindings(false)
     setShowTrainingDashboard(false)
+    setShowWorkflowOutput(false)
   }
 
   const handleClear = () => {
@@ -444,6 +476,16 @@ export function Toolbar() {
           </button>
         )}
 
+        {/* Current workflow execution */}
+        <button
+          style={{ ...activeBtnStyle, background: '#174031', borderColor: '#2f7a5c', color: '#a8f0d0', opacity: workflowExecutionLoading ? 0.7 : 1 }}
+          onClick={(e) => { e.stopPropagation(); handleExecuteCurrentWorkflow() }}
+          disabled={workflowExecutionLoading}
+          title="Execute current node graph training loop"
+        >
+          {workflowExecutionLoading ? '⏳ Testing...' : '▶ Test Train'}
+        </button>
+
         {/* Train button */}
         <button
           style={{ ...activeBtnStyle, background: '#c0392b', borderColor: '#922b21', color: '#fff' }}
@@ -506,6 +548,41 @@ export function Toolbar() {
         <>
           <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowTrainingDashboard(false)} />
           <TrainingDashboard onClose={() => setShowTrainingDashboard(false)} />
+        </>
+      )}
+
+      {showWorkflowOutput && (
+        <>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowWorkflowOutput(false)} />
+          <div style={{ ...trainingPanelStyle, width: 520 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: workflowExecutionError ? '#ff9999' : '#a8f0d0' }}>
+                {workflowExecutionError ? 'Execution Failed' : workflowExecutionLoading ? 'Executing Workflow' : 'Execution Output'}
+              </div>
+              <button onClick={() => setShowWorkflowOutput(false)} style={{ ...settingsBtnStyle, color: '#888' }}>×</button>
+            </div>
+            {workflowExecutionError && (
+              <div style={{ padding: 10, marginBottom: 10, borderRadius: 6, border: '1px solid #8b4444', background: '#2a1515', color: '#ffaaaa', fontSize: 12, lineHeight: 1.5 }}>
+                {workflowExecutionError}
+              </div>
+            )}
+            <pre style={{
+              margin: 0,
+              minHeight: 180,
+              maxHeight: 360,
+              overflow: 'auto',
+              background: '#0e1117',
+              border: '1px solid #273244',
+              borderRadius: 6,
+              padding: 12,
+              color: '#c9d7e8',
+              fontSize: 11,
+              lineHeight: 1.5,
+              whiteSpace: 'pre-wrap',
+            }}>
+              {workflowExecutionLoading ? 'Running...' : workflowOutput || 'No output.'}
+            </pre>
+          </div>
         </>
       )}
 

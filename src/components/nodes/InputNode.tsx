@@ -50,8 +50,12 @@ const InputNode = memo((props: NodeProps<NodeData>) => {
       <div style={rs}>
         <span style={ls}>Name</span>
         <input
+          className="nodrag nowheel"
           style={is_}
           value={String(data.params.name ?? '')}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
           onChange={(e) => setField('name', e.target.value)}
           placeholder="image"
         />
@@ -59,8 +63,12 @@ const InputNode = memo((props: NodeProps<NodeData>) => {
       <div style={rs}>
         <span style={ls}>Shape</span>
         <input
+          className="nodrag nowheel"
           style={is_}
           value={String(data.params.shape ?? '')}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
           onChange={(e) => setField('shape', e.target.value)}
           placeholder="3,224,224"
         />
@@ -68,8 +76,12 @@ const InputNode = memo((props: NodeProps<NodeData>) => {
       <div style={rs}>
         <span style={ls}>DType</span>
         <select
+          className="nodrag nowheel"
           style={sel_}
           value={String(data.params.dtype ?? 'float32')}
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onWheel={(e) => e.stopPropagation()}
           onChange={(e) => setField('dtype', e.target.value)}
         >
           <option value="float32">float32</option>

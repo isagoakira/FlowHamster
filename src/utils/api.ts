@@ -2,9 +2,10 @@
  * FlowHamster API Client
  */
 import { FlowHamsterNode, FlowHamsterEdge } from '../types/graph'
+import { DataFlowEdge, DataFlowNode } from '../types/dataGraph'
 import { getExecutableGraph } from './graphStructure'
 import { API_BASE_URL } from './runtimeConfig'
-import { WorkflowTrainingConfig } from '../schema/workflowDocument'
+import { WorkflowBinding, WorkflowTrainingConfig } from '../schema/workflowDocument'
 
 export interface GenerateOptions {
   include_trainer?: boolean
@@ -15,14 +16,15 @@ export interface GenerateOptions {
   evaluation_nodes?: boolean   // 是否包含评测节点代码
 }
 
-export async function generateCode(
-  nodes: FlowHamsterNode[],
-  edges: FlowHamsterEdge[],
-  options?: GenerateOptions,
-  trainingConfig?: WorkflowTrainingConfig
-): Promise<{ success: boolean; code: string; warnings: string[] }> {
+export interface WorkflowPayloadOptions {
+  dataGraphNodes?: DataFlowNode[]
+  dataGraphEdges?: DataFlowEdge[]
+  bindings?: WorkflowBinding[]
+}
+
+function buildExecutableGraphPayload(nodes: FlowHamsterNode[], edges: FlowHamsterEdge[]) {
   const executableGraph = getExecutableGraph(nodes, edges)
-  const graph = {
+  return {
     nodes: executableGraph.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),
     edges: executableGraph.edges.map((e) => ({
       source: e.source,
@@ -32,10 +34,31 @@ export async function generateCode(
       data: e.data,
     })),
   }
+}
+
+export async function generateCode(
+  nodes: FlowHamsterNode[],
+  edges: FlowHamsterEdge[],
+  options?: GenerateOptions,
+  trainingConfig?: WorkflowTrainingConfig,
+  workflowOptions?: WorkflowPayloadOptions
+): Promise<{ success: boolean; code: string; warnings: string[] }> {
+  const graph = buildExecutableGraphPayload(nodes, edges)
   const res = await fetch(`${API_BASE_URL}/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ graph, options: options || {}, training_config: trainingConfig || null }),
+    body: JSON.stringify({
+      graph,
+      options: options || {},
+      training_config: trainingConfig || null,
+      data_graph: workflowOptions?.dataGraphNodes || workflowOptions?.dataGraphEdges
+        ? {
+            nodes: workflowOptions?.dataGraphNodes ?? [],
+            edges: workflowOptions?.dataGraphEdges ?? [],
+          }
+        : null,
+      bindings: workflowOptions?.bindings ?? null,
+    }),
   })
   return res.json()
 }
@@ -48,6 +71,33 @@ export async function executeCode(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ code, target_device: device }),
+  })
+  return res.json()
+}
+
+export async function executeWorkflow(
+  nodes: FlowHamsterNode[],
+  edges: FlowHamsterEdge[],
+  trainingConfig: WorkflowTrainingConfig,
+  workflowOptions?: WorkflowPayloadOptions,
+  device?: string
+): Promise<{ success: boolean; output: string; error?: string | null }> {
+  const graph = buildExecutableGraphPayload(nodes, edges)
+  const res = await fetch(`${API_BASE_URL}/execute`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      graph,
+      training_config: trainingConfig,
+      data_graph: workflowOptions?.dataGraphNodes || workflowOptions?.dataGraphEdges
+        ? {
+            nodes: workflowOptions?.dataGraphNodes ?? [],
+            edges: workflowOptions?.dataGraphEdges ?? [],
+          }
+        : null,
+      bindings: workflowOptions?.bindings ?? null,
+      target_device: device ?? trainingConfig.runtime?.device ?? 'cpu',
+    }),
   })
   return res.json()
 }

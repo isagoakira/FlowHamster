@@ -34,6 +34,14 @@ def _python_value(value) -> str:
     return str(value)
 
 
+def _python_bool(value, fallback: bool = False) -> str:
+    if value is None:
+        value = fallback
+    if isinstance(value, str):
+        return "True" if value.strip().lower() in {"1", "true", "yes", "on"} else "False"
+    return "True" if bool(value) else "False"
+
+
 def _infer_tensor_expression(field: str, task_type: str | None = None) -> str:
     lowered = field.lower()
     if any(keyword in lowered for keyword in ("label", "target", "class")):
@@ -87,17 +95,48 @@ def _generate_data_node_code(node: dict, node_index: int) -> DataNodeCodeGen:
     elif node_type == "csv_source":
         path = _python_value(params.get("path", "./data/train.csv"))
         delimiter = _python_value(params.get("delimiter", ","))
+        label_column = str(params.get("label_column", "label") or "label").strip() or "label"
+        feature_columns = [
+            column.strip()
+            for column in str(params.get("feature_columns", "") or "").split(",")
+            if column.strip()
+        ]
+        feature_columns_expr = (
+            f"[{', '.join(_python_value(column) for column in feature_columns)}]"
+            if feature_columns
+            else f"[col for col in self._{node_id}_columns if col != self._{node_id}_label_column and col.lower() not in ('label', 'class', 'target')]"
+        )
         result.init_code.extend([
             f"        self._{node_id}_df = pd.read_csv({path}, delimiter={delimiter})",
+            f"        self._{node_id}_columns = list(self._{node_id}_df.columns)",
+            f"        self._{node_id}_label_column = {_python_value(label_column)}",
+            f"        self._{node_id}_feature_columns = {feature_columns_expr}",
             f"        self._{node_id}_cache = {{}}"
         ])
         result.getitem_code.extend([
             f"        # CSV Source: {path}",
-            f"        row = self._{node_id}_df.iloc[index % len(self._{node_id}_df)]",
-            f"        _field_label = int(row.get('label', 0))",
-            f"        _field_data = row.to_dict()"
+            f"        row = self._{node_id}_df.iloc[index % len(self._{node_id}_df)] if len(self._{node_id}_df) > 0 else {{}}",
+            f"        _field_data = row.to_dict() if hasattr(row, 'to_dict') else dict(row)",
+            f"        _feature_values = []",
+            f"        if self._{node_id}_label_column in row and not pd.isna(row[self._{node_id}_label_column]):",
+            f"            _field_label = int(float(row[self._{node_id}_label_column]))",
+            f"        for col in self._{node_id}_feature_columns:",
+            f"            numeric_val = 0.0",
+            f"            val = row[col] if col in row else None",
+            f"            if val is None or pd.isna(val):",
+            f"                _feature_values.append(numeric_val)",
+            f"                continue",
+            f"            try:",
+            f"                numeric_val = float(val)",
+            f"            except Exception:",
+            f"                numeric_val = 0.0",
+            f"            _feature_values.append(numeric_val)",
+            f"            locals()[f'_field_{{col}}'] = torch.tensor(numeric_val, dtype=torch.float32)",
+            f"            _field_names.append(f'_field_{{col}}')",
+            f"        _field_features = torch.tensor(_feature_values, dtype=torch.float32) if _feature_values else torch.zeros(1, dtype=torch.float32)",
         ])
         result.field_tracking["label"] = "_field_label"
+        result.field_tracking["features"] = "_field_features"
         result.field_tracking["data"] = "_field_data"
 
     elif node_type == "jsonl_source":
@@ -217,6 +256,26 @@ def _generate_data_node_code(node: dict, node_index: int) -> DataNodeCodeGen:
         strategy = _python_value(params.get("strategy", "default"))
         result.getitem_code.append(f"        # Collate (strategy={strategy}) - handled by DataLoader collate_fn")
 
+    elif node_type == "dataloader":
+        batch_size = int(params.get("batch_size", 32))
+        shuffle = params.get("shuffle", True)
+        num_workers = int(params.get("num_workers", 4))
+        pin_memory = params.get("pin_memory", True)
+        drop_last = params.get("drop_last", False)
+        result.getitem_code.append(
+            f"        # DataLoader (batch_size={batch_size}, shuffle={shuffle}, num_workers={num_workers}, pin_memory={pin_memory})"
+        )
+        result.init_code.extend([
+            f"        self._dataloader_config_{node_id} = {{",
+            f"            'batch_size': {batch_size},",
+            f"            'shuffle': {_python_bool(shuffle, True)},",
+            f"            'num_workers': {num_workers},",
+            f"            'pin_memory': {_python_bool(pin_memory, True)},",
+            f"            'drop_last': {_python_bool(drop_last, False)},",
+            f"        }}",
+        ])
+        result.field_tracking["dataloader"] = "_dataloader"
+
     elif node_type == "dataset_output":
         fields = str(params.get("fields", "")).split(",")
         fields = [f.strip() for f in fields if f.strip()]
@@ -256,6 +315,39 @@ def _collect_model_input_names(nodes: list[dict]) -> list[str]:
         name = str(params.get("name", "")).strip()
         names.append(name or f"input_{index + 1}")
     return names
+
+
+def _source_length_expression(node: dict) -> str | None:
+    data = node.get("data", {}) or {}
+    node_type = data.get("nodeType")
+    node_id = _safe_token(str(node.get("id", "")))
+    if node_type == "folder_source":
+        return f"len(self._{node_id}_paths)"
+    if node_type in {"csv_source", "parquet_source"}:
+        return f"len(self._{node_id}_df)"
+    if node_type == "huggingface_source":
+        return f"len(self._{node_id}_dataset)"
+    return None
+
+
+def _dataloader_config_block(nodes: list[dict], training_config: dict) -> str:
+    loader_node = next((node for node in nodes if (node.get("data", {}) or {}).get("nodeType") == "dataloader"), None)
+    params = ((loader_node or {}).get("data", {}) or {}).get("params", {}) or {}
+    runtime = training_config.get("runtime", {}) or {}
+    batch_size = int(params.get("batch_size", runtime.get("batchSize", 1)))
+    shuffle = params.get("shuffle", True)
+    num_workers = int(params.get("num_workers", runtime.get("numWorkers", 0)))
+    pin_memory = params.get("pin_memory", False)
+    drop_last = params.get("drop_last", False)
+    return "\n".join([
+        "DATALOADER_CONFIG = {",
+        f"    'batch_size': {batch_size},",
+        f"    'shuffle': {_python_bool(shuffle, True)},",
+        f"    'num_workers': {num_workers},",
+        f"    'pin_memory': {_python_bool(pin_memory, False)},",
+        f"    'drop_last': {_python_bool(drop_last, False)},",
+        "}",
+    ])
 
 
 def _format_node_summary(node: dict, index: int) -> str:
@@ -368,8 +460,8 @@ def compile_dataflow(
         lowered = field.lower()
         if any(kw in lowered for kw in ("label", "target", "class")):
             if task_type == "regression":
-                return "torch.randn(1, 1)"
-            return "torch.randint(0, 10, (1,), dtype=torch.long)"
+                return "torch.tensor(0.0, dtype=torch.float32)"
+            return "torch.tensor(0, dtype=torch.long)"
         if "mask" in lowered:
             return "torch.randint(0, 2, (1, 1, 224, 224), dtype=torch.long)"
         if any(kw in lowered for kw in ("token", "text", "ids")):
@@ -378,19 +470,30 @@ def compile_dataflow(
             return "torch.randn(1, 3, 224, 224)"
         return "torch.randn(1, 8)"
 
-    sample_return_block = "\n".join(f'            "{field}": locals().get("_field_{field}") or {_getitem_fallback_expr(field, task_type)},' for field in sample_fields)
+    sample_return_block = "\n".join(
+        f'            "{field}": locals().get("_field_{field}", {_getitem_fallback_expr(field, task_type)}),'
+        for field in sample_fields
+    )
+    source_length_expressions = [expr for expr in (_source_length_expression(node) for node in sorted_nodes) if expr]
+    dataset_size_line = (
+        f"        self._size = max(1, {', '.join(source_length_expressions)})"
+        if source_length_expressions
+        else "        self._size = 1"
+    )
+    dataloader_config = _dataloader_config_block(sorted_nodes, training_config)
 
     if has_real_data_pipeline:
         real_dataset_class = f'''
 class FlowHamsterDataset(torch.utils.data.Dataset):
     def __init__(self):
 {init_code_block}
-        self._size = max(1, len(self._paths) if hasattr(self, '_paths') else 1)
+{dataset_size_line}
 
     def __len__(self):
         return self._size
 
     def __getitem__(self, index):
+        _field_names = []
 {getitem_code_block}
 
         # 构建输出字典，使用 field_tracking 中填充的真实变量
@@ -445,17 +548,38 @@ BOUND_MODEL_INPUTS = {{
 }}
 BOUND_TRAINING_TARGET = {target_binding_source!r}
 PRIMARY_MODEL_INPUT_KEY = {primary_model_input_key!r}
+{dataloader_config}
 
 {real_dataset_class}
 
 def build_demo_batch(device):
+    try:
+        loader = build_flowhamster_dataloader()
+        batch = next(iter(loader))
+        if isinstance(batch, dict):
+            return batch
+    except Exception as exc:
+        print(f"Data pipeline warning: {{exc}}")
+
+    return build_fallback_batch(device)
+
+def build_fallback_batch(device):
     return {{
 {sample_lines_block}
     }}
 
+def build_flowhamster_dataset():
+    return FlowHamsterDataset()
+
+def build_flowhamster_dataloader():
+    dataset = build_flowhamster_dataset()
+    return torch.utils.data.DataLoader(dataset, **DATALOADER_CONFIG)
+
 def _coerce_bound_value(value, device):
     if torch.is_tensor(value):
         return value.to(device)
+    if isinstance(value, (int, float)):
+        return torch.tensor(value, device=device)
     return None
 
 def resolve_bound_inputs(batch, device):
@@ -471,10 +595,14 @@ def resolve_bound_inputs(batch, device):
 
     return model_feed, target
 
-def select_primary_model_input(model_feed, device):
+def select_primary_model_input(model_feed, device, batch_size=None):
     if PRIMARY_MODEL_INPUT_KEY and PRIMARY_MODEL_INPUT_KEY in model_feed:
         return model_feed[PRIMARY_MODEL_INPUT_KEY]
-    return torch.randn(1, 3, 224, 224, device=device)"""
+    for value in model_feed.values():
+        if torch.is_tensor(value):
+            return value
+    fallback_batch_size = int(batch_size) if batch_size else 1
+    return torch.randn(fallback_batch_size, 3, 224, 224, device=device)"""
 
     return CompiledDataflow(
         output_fields=output_fields,
