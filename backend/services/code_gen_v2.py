@@ -35,7 +35,7 @@ NODE_SIGNATURES: dict[str, dict] = {
 
     # ── 线性 ──
     "linear": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.Linear",
-               "module_template": "nn.Linear(in_features={in_features}, out_features={out_features}, bias={bias})"},
+               "module_template": "nn.Linear(in_features={in_features}, out_features={out_features}{bias})"},
 
     # ── 激活函数 ──
     "relu":      {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.ReLU",      "module_template": "nn.ReLU()"},
@@ -47,9 +47,9 @@ NODE_SIGNATURES: dict[str, dict] = {
 
     # ── 池化 ──
     "maxpool":  {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.MaxPool2d",
-                 "module_template": "nn.MaxPool2d(kernel_size={kernel_size}, stride={stride})"},
+                 "module_template": "nn.MaxPool2d(kernel_size={kernel_size}{stride})"},
     "avgpool":  {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.AvgPool2d",
-                 "module_template": "nn.AvgPool2d(kernel_size={kernel_size}, stride={stride})"},
+                 "module_template": "nn.AvgPool2d(kernel_size={kernel_size}{stride})"},
     "adaptiveavgpool": {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.AdaptiveAvgPool2d",
                         "module_template": "nn.AdaptiveAvgPool2d(output_size={output_size})"},
     "globalavgpool":   {"inputs": {"x": "Tensor"}, "output": "Tensor", "module": "nn.AdaptiveAvgPool2d",

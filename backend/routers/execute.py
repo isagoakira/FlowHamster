@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 import os
 
-router = APIRouter(prefix="/api/execute", tags=["execute"])
+router = APIRouter(prefix="/execute", tags=["execute"])
 
 
 class ExecuteRequest(BaseModel):
@@ -56,7 +56,6 @@ async def execute_code(req: ExecuteRequest):
     Returns:
         ExecuteResponse: 包含执行结果
     """
-async def execute_code(req: ExecuteRequest):
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False) as f:
         f.write(req.code)
         tmp_path = f.name
@@ -69,10 +68,15 @@ async def execute_code(req: ExecuteRequest):
             timeout=60,
         )
         output = result.stdout + result.stderr
+        error = result.stderr if result.returncode != 0 else None
+        # 避免将 traceback 泄露到前端，只保留最后一行异常信息
+        if error and "Traceback" in error:
+            lines = [ln for ln in error.strip().splitlines() if ln.strip()]
+            error = lines[-1] if lines else error
         return ExecuteResponse(
             success=result.returncode == 0,
             output=output,
-            error=result.stderr if result.returncode != 0 else None,
+            error=error,
         )
     except subprocess.TimeoutExpired:
         return ExecuteResponse(success=False, output="", error="Execution timed out (60s limit)")
