@@ -92,7 +92,7 @@ export interface NodeDefinition {
   defaultParams: Record<string, number | string | boolean>
   outputType: string
   // Optional fields for composite nodes
-  isComposite?: true
+  isComposite?: boolean
   internalStructure?: SubModule[]
   internalEdges?: InternalEdge[]
   outputVar?: string
@@ -529,27 +529,9 @@ export const NODE_REGISTRY: NodeCategory[] = [
         type: 'mamba',
         label: 'Mamba',
         description: 'Mamba state space model (simplified)',
-        defaultParams: { d_model: 512, d_state: 16, d_conv: 4, expand: 2, dropout: 0.1 },
+        defaultParams: { d_model: 512, d_state: 16, d_conv: 4, expand: 2, dt_rank: 0, n_layers: 1, dropout: 0.1 },
         outputType: 'Tensor',
-        isComposite: true as const,
-        // Mamba structure:
-        // x → input_proj (expand d_model to d_model*expand) → conv1d → silu → SSM (linear) → dropout → output_proj
-        internalStructure: [
-          { id: 'in_proj', type: 'linear' as const, label: 'InputProj', sourceInput: 'x', params: { in_features: '${d_model}', out_features: '${d_model * expand}' } },
-          { id: 'conv1d', type: 'conv1d' as const, label: 'Conv1D', params: { in_channels: '${d_model * expand}', out_channels: '${d_model * expand}', kernel_size: '${d_conv}', padding: '${d_conv - 1}' } },
-          { id: 'act', type: 'silu' as const, label: 'SiLU', params: {} },
-          { id: 'ssm', type: 'linear' as const, label: 'SSM', params: { in_features: '${d_model * expand}', out_features: '${d_model * expand}' } },
-          { id: 'drop', type: 'dropout' as const, label: 'Dropout', params: { p: '${dropout}' } },
-          { id: 'out_proj', type: 'linear' as const, label: 'OutputProj', params: { in_features: '${d_model * expand}', out_features: '${d_model}' } },
-        ],
-        internalEdges: [
-          { from: 'in_proj', to: 'conv1d' },
-          { from: 'conv1d', to: 'act' },
-          { from: 'act', to: 'ssm' },
-          { from: 'ssm', to: 'drop' },
-          { from: 'drop', to: 'out_proj' },
-        ],
-        outputVar: 'out_proj',
+        isComposite: false as const,
       },
     ],
   },

@@ -781,8 +781,11 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
     }
     if (opType === 'squeeze') {
       const up = resolveSrc(Object.values(inputs).find((v): v is string => typeof v === 'string' && v !== null) ?? null, allBlocks)
-      const dim = fields.dim !== undefined ? `, dim=${fields.dim}` : ''
-      return `        ${outputVar} = ${up}.squeeze(${dim.slice(2)})`
+      const dimVal = fields.dim
+      if (dimVal !== undefined && dimVal !== '' && dimVal !== null) {
+        return `        ${outputVar} = ${up}.squeeze(dim=${dimVal})`
+      }
+      return `        ${outputVar} = ${up}.squeeze()`
     }
     if (opType === 'expand') {
       const up = resolveSrc(Object.values(inputs).find((v): v is string => typeof v === 'string' && v !== null) ?? null, allBlocks)
@@ -813,8 +816,11 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
       return `        ${outputVar} = ${upVar}.permute(${dimsStr})`
     }
     if (opType === 'squeeze') {
-      const dim = fields.dim !== undefined ? fields.dim : ''
-      return `        ${outputVar} = ${upVar}.squeeze(${dim})`
+      const dimVal = fields.dim
+      if (dimVal !== undefined && dimVal !== '' && dimVal !== null) {
+        return `        ${outputVar} = ${upVar}.squeeze(${dimVal})`
+      }
+      return `        ${outputVar} = ${upVar}.squeeze()`
     }
     if (opType === 'flatten') return `        ${outputVar} = ${upVar}.flatten(start_dim=${fields.start_dim ?? 1})`
     if (opType === 'transformerencoder') return `        ${outputVar} = self.${block.instanceName}(${upVar})`
