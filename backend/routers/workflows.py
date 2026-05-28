@@ -5,6 +5,7 @@ FlowHamster Workflow Router
 import os
 import json
 import shutil
+import re
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, HTTPException
@@ -15,14 +16,17 @@ router = APIRouter(prefix="/workflows", tags=["workflows"])
 # 工作流存储根目录
 WORKFLOWS_DIR = Path(__file__).parent.parent.parent / "workflows"
 
+
 class WorkflowCreate(BaseModel):
     name: str
     description: Optional[str] = ""
+
 
 class WorkflowUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     document: Optional[dict] = None
+
 
 class WorkflowInfo(BaseModel):
     id: str
@@ -31,14 +35,70 @@ class WorkflowInfo(BaseModel):
     created_at: float
     updated_at: float
 
+
+def _is_safe_workflow_id(workflow_id: str) -> bool:
+    """
+    检查 workflow_id 是否仅包含安全字符。
+    拒绝包含路径分隔符、.. 或空字符串的 ID。
+    """
+    if not workflow_id or workflow_id in (".", ".."):
+        return False
+    # 拒绝任何包含路径分隔符或 .. 的 ID
+    if ".." in workflow_id or "/" in workflow_id or "\\" in workflow_id:
+        return False
+    # 拒绝以 . 开头的 ID（防止隐藏文件/目录）
+    if workflow_id.startswith("."):
+        return False
+    # 只允许字母、数字、下划线、连字符和点
+    if not re.match(r"^[\w.\-]+$", workflow_id):
+        return False
+    return True
+
+
+def resolve_safe_workflow_path(workflow_id: str) -> Path:
+    """
+    安全解析 workflow_id 为工作流目录路径。
+
+    校验规则：
+    1. 拒绝空字符串、. 和 ..
+    2. 拒绝包含路径分隔符或 .. 的 ID
+    3. 只允许字母、数字、下划线、连字符和点
+    4. resolve() 后校验最终路径仍在 WORKFLOWS_DIR 下
+
+    返回:
+        Path: 安全工作流目录路径
+
+    异常:
+        HTTPException(400): workflow_id 包含非法字符或路径遍历
+        HTTPException(404): 工作流目录不存在
+    """
+    if not _is_safe_workflow_id(workflow_id):
+        raise HTTPException(status_code=400, detail="Invalid workflow ID")
+
+    wf_dir = (WORKFLOWS_DIR / workflow_id).resolve()
+
+    # 二次校验：resolve 后的路径必须仍在 WORKFLOWS_DIR 下
+    try:
+        wf_dir.relative_to(WORKFLOWS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workflow path")
+
+    if not wf_dir.exists():
+        raise HTTPException(status_code=404, detail="Workflow not found")
+
+    return wf_dir
+
+
 def get_workflow_dir(name: str) -> Path:
     """获取工作流目录路径（sanitized name）"""
     safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in name)
     return WORKFLOWS_DIR / safe_name
 
+
 def ensure_workflows_dir():
     """确保工作流根目录存在"""
     WORKFLOWS_DIR.mkdir(exist_ok=True)
+
 
 def get_default_document(workflow_id: str, name: str, description: str) -> dict:
     """创建默认的工作流文档结构"""
@@ -78,6 +138,7 @@ def get_default_document(workflow_id: str, name: str, description: str) -> dict:
         "bindings": []
     }
 
+
 @router.get("")
 async def list_workflows():
     """列出所有工作流"""
@@ -90,7 +151,7 @@ async def list_workflows():
                 try:
                     meta = json.loads(meta_file.read_text())
                     workflows.append(meta)
-                except:
+                except Exception:
                     workflows.append({
                         "id": item.name,
                         "name": item.name,
@@ -99,6 +160,7 @@ async def list_workflows():
                         "updated_at": item.stat().st_mtime,
                     })
     return workflows
+
 
 @router.post("")
 async def create_workflow(workflow: WorkflowCreate):
@@ -130,12 +192,11 @@ async def create_workflow(workflow: WorkflowCreate):
 
     return meta
 
+
 @router.get("/{workflow_id}")
 async def get_workflow(workflow_id: str):
     """获取工作流完整文档"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = resolve_safe_workflow_path(workflow_id)
 
     meta_file = wf_dir / "metadata.json"
     doc_file = wf_dir / "document.json"
@@ -150,12 +211,11 @@ async def get_workflow(workflow_id: str):
 
     return {**meta, "document": document}
 
+
 @router.put("/{workflow_id}")
 async def update_workflow(workflow_id: str, update: WorkflowUpdate):
     """更新工作流"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = resolve_safe_workflow_path(workflow_id)
 
     meta_file = wf_dir / "metadata.json"
     doc_file = wf_dir / "document.json"
@@ -193,22 +253,26 @@ async def update_workflow(workflow_id: str, update: WorkflowUpdate):
 
     return meta
 
+
 @router.delete("/{workflow_id}")
 async def delete_workflow(workflow_id: str):
     """删除工作流"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = resolve_safe_workflow_path(workflow_id)
+
+    # 二次目录边界校验：确保要删除的目录确实在 WORKFLOWS_DIR 下
+    try:
+        wf_dir.resolve().relative_to(WORKFLOWS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid workflow path")
 
     shutil.rmtree(wf_dir)
     return {"status": "ok"}
 
+
 @router.get("/{workflow_id}/document")
 async def get_workflow_document(workflow_id: str):
     """获取工作流文档（不含 metadata）"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = resolve_safe_workflow_path(workflow_id)
 
     doc_file = wf_dir / "document.json"
     if not doc_file.exists():
@@ -216,12 +280,11 @@ async def get_workflow_document(workflow_id: str):
 
     return json.loads(doc_file.read_text())
 
+
 @router.put("/{workflow_id}/document")
 async def save_workflow_document(workflow_id: str, document: dict):
     """保存完整工作流文档"""
-    wf_dir = WORKFLOWS_DIR / workflow_id
-    if not wf_dir.exists():
-        raise HTTPException(status_code=404, detail="Workflow not found")
+    wf_dir = resolve_safe_workflow_path(workflow_id)
 
     doc_file = wf_dir / "document.json"
     meta_file = wf_dir / "metadata.json"
