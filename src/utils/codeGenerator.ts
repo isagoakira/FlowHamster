@@ -179,7 +179,12 @@ export function generateLocalCode(
 
   for (const block of lossBlocks) {
     const li = genLossInit(block)
-    if (li) lossInitLines.push(`    ${li}`)
+    if (!li) continue
+    if (Array.isArray(li)) {
+      lossInitLines.push(...li.map(l => `    ${l}`))
+    } else {
+      lossInitLines.push(`    ${li}`)
+    }
   }
 
   for (const block of lossBlocks) {

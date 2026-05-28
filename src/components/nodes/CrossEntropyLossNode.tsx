@@ -2,7 +2,7 @@ import { memo, useState } from 'react'
 import { Handle, Position, NodeProps } from 'reactflow'
 import { NodeData } from '../../types/graph'
 import { useGraphStore } from '../../hooks/useGraphStore'
-import { BASE_NODE_STYLE, NODE_COLORS, HANDLE_TARGET_STYLE, HANDLE_SOURCE_STYLE, DELETE_BUTTON_STYLE } from './nodeStyles'
+import { BASE_NODE_STYLE, DELETE_BUTTON_STYLE } from './nodeStyles'
 
 const CrossEntropyLossNode = memo((props: NodeProps<NodeData>) => {
   const { id } = props

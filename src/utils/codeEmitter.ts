@@ -81,13 +81,13 @@ function genSubModuleInit(subModule: SubModule, params: Record<string, any>, pre
 
   switch (subModule.type) {
     case 'linear':
-      return `self.${name} = nn.Linear(in_features=${resolvedParams.in_features}, out_features=${resolvedParams.out_features}, bias=False)`
+      return `self.${name} = nn.Linear(in_features=${resolvedParams.in_features}, out_features=${resolvedParams.out_features}, bias=${pyBool(resolvedParams.bias, true)})`
     case 'conv1d':
-      return `self.${name} = nn.Conv1d(in_channels=${resolvedParams.in_channels}, out_channels=${resolvedParams.out_channels}, kernel_size=${resolvedParams.kernel_size}, stride=${resolvedParams.stride || 1}, padding=${resolvedParams.padding || 0}, bias=False)`
+      return `self.${name} = nn.Conv1d(in_channels=${resolvedParams.in_channels}, out_channels=${resolvedParams.out_channels}, kernel_size=${resolvedParams.kernel_size}, stride=${resolvedParams.stride || 1}, padding=${resolvedParams.padding || 0}, bias=${pyBool(resolvedParams.bias, false)})`
     case 'conv2d':
-      return `self.${name} = nn.Conv2d(in_channels=${resolvedParams.in_channels}, out_channels=${resolvedParams.out_channels}, kernel_size=${resolvedParams.kernel_size}, stride=${resolvedParams.stride || 1}, padding=${resolvedParams.padding || 0}, bias=False)`
+      return `self.${name} = nn.Conv2d(in_channels=${resolvedParams.in_channels}, out_channels=${resolvedParams.out_channels}, kernel_size=${resolvedParams.kernel_size}, stride=${resolvedParams.stride || 1}, padding=${resolvedParams.padding || 0}, bias=${pyBool(resolvedParams.bias, false)})`
     case 'conv3d':
-      return `self.${name} = nn.Conv3d(in_channels=${resolvedParams.in_channels}, out_channels=${resolvedParams.out_channels}, kernel_size=${resolvedParams.kernel_size}, stride=${resolvedParams.stride || 1}, padding=${resolvedParams.padding || 0}, bias=False)`
+      return `self.${name} = nn.Conv3d(in_channels=${resolvedParams.in_channels}, out_channels=${resolvedParams.out_channels}, kernel_size=${resolvedParams.kernel_size}, stride=${resolvedParams.stride || 1}, padding=${resolvedParams.padding || 0}, bias=${pyBool(resolvedParams.bias, false)})`
     case 'layernorm':
       return `self.${name} = nn.LayerNorm(normalized_shape=${resolvedParams.normalized_shape})`
     case 'batchnorm2d':
@@ -836,10 +836,30 @@ export function genForward(block: NodeBlock, allBlocks: NodeBlock[]): string | n
 // Loss Generation
 // ─────────────────────────────────────────────
 
-export function genLossInit(block: NodeBlock): string | null {
+export function genLossInit(block: NodeBlock): string | string[] | null {
   switch (block.opType) {
     case 'crossentropyloss': return 'loss_fn = nn.CrossEntropyLoss()'
     case 'mseloss': return 'mse_loss_fn = nn.MSELoss()'
+    case 'focalloss': {
+      const alpha = block.fields.alpha ?? 0.25
+      const gamma = block.fields.gamma ?? 2.0
+      return [
+        'class FocalLoss(nn.Module):',
+        '    def __init__(self, alpha=1, gamma=2):',
+        '        super().__init__()',
+        '        self.alpha = alpha',
+        '        self.gamma = gamma',
+        '    def forward(self, inputs, targets):',
+        '        ce_loss = F.cross_entropy(inputs, targets, reduction="none")',
+        '        pt = torch.exp(-ce_loss)',
+        '        return (self.alpha * (1-pt)**self.gamma * ce_loss).mean()',
+        `focal_loss_fn = FocalLoss(alpha=${alpha}, gamma=${gamma})`,
+      ]
+    }
+    case 'labelsmoothing': {
+      const smoothing = block.fields.smoothing ?? 0.1
+      return `ls_loss_fn = nn.CrossEntropyLoss(label_smoothing=${smoothing})`
+    }
     case 'adam': return 'optimizer = torch.optim.Adam(model.parameters(), lr=0.001)'
     case 'adamw': return 'optimizer = torch.optim.AdamW(model.parameters(), lr=0.001)'
     case 'sgd': return 'optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)'
@@ -854,6 +874,10 @@ export function genLossForward(block: NodeBlock, upstreamOutputVar: string): str
       return `    loss = loss_fn(${upstreamOutputVar}, torch.randint(0, ${block.fields.num_classes ?? 10}, (1,)))`
     case 'mseloss':
       return `    loss = mse_loss_fn(${upstreamOutputVar}, torch.randn_like(${upstreamOutputVar}))`
+    case 'focalloss':
+      return `    loss = focal_loss_fn(${upstreamOutputVar}, torch.randint(0, ${block.fields.num_classes ?? 10}, (1,)))`
+    case 'labelsmoothing':
+      return `    loss = ls_loss_fn(${upstreamOutputVar}, torch.randint(0, ${block.fields.num_classes ?? 10}, (1,)))`
     default: return null
   }
 }

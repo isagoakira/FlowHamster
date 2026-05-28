@@ -1216,6 +1216,46 @@ export const NODE_DEFINITIONS: Record<string, NodeDef> = {
   },
 
   // ============================================================
+  // Instance Normalization
+  // ============================================================
+  instnorm: {
+    type: 'instnorm',
+    label: 'InstanceNorm2d',
+    category: NodeCategory.NORMALIZATION,
+    description: '实例归一化',
+    params: {
+      num_features: { type: 'number', default: 64, description: '特征数' },
+      eps: { type: 'number', default: 1e-5, description: 'epsilon' },
+      momentum: { type: 'number', default: 0.1, description: '动量' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  // ============================================================
+  // LSTM
+  // ============================================================
+  lstm: {
+    type: 'lstm',
+    label: 'LSTM',
+    category: NodeCategory.ATTENTION,
+    description: '长短期记忆网络',
+    params: {
+      input_size: { type: 'number', default: 512, description: '输入大小' },
+      hidden_size: { type: 'number', default: 512, description: '隐藏层大小' },
+      num_layers: { type: 'number', default: 2, description: '层数' },
+    },
+    handles: {
+      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  // ============================================================
   // Evaluation
   // ============================================================
   accuracy: {
@@ -1229,7 +1269,123 @@ export const NODE_DEFINITIONS: Record<string, NodeDef> = {
       top_k: { type: 'number', default: 1, description: 'top k' },
     },
     handles: {
-      inputs: [{ id: HandleIds.INPUT, position: 'left', label: 'input' }],
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  f1: {
+    type: 'f1',
+    label: 'F1 Score',
+    category: NodeCategory.EVALUATION,
+    description: 'F1 分数',
+    params: {
+      metric_type: { type: 'string', default: 'f1', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  precision: {
+    type: 'precision',
+    label: 'Precision',
+    category: NodeCategory.EVALUATION,
+    description: '精确率',
+    params: {
+      metric_type: { type: 'string', default: 'precision', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  recall: {
+    type: 'recall',
+    label: 'Recall',
+    category: NodeCategory.EVALUATION,
+    description: '召回率',
+    params: {
+      metric_type: { type: 'string', default: 'recall', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  confusion_matrix: {
+    type: 'confusion_matrix',
+    label: 'Confusion Matrix',
+    category: NodeCategory.EVALUATION,
+    description: '混淆矩阵',
+    params: {
+      metric_type: { type: 'string', default: 'confusion_matrix', description: '指标类型' },
+    },
+    handles: {
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  mean_iou: {
+    type: 'mean_iou',
+    label: 'Mean IoU',
+    category: NodeCategory.EVALUATION,
+    description: '平均交并比',
+    params: {
+      metric_type: { type: 'string', default: 'mean_iou', description: '指标类型' },
+      num_classes: { type: 'number', default: 10, description: '类别数' },
+    },
+    handles: {
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
+      outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
+    },
+    isComposite: false,
+  },
+
+  roc_auc: {
+    type: 'roc_auc',
+    label: 'ROC AUC',
+    category: NodeCategory.EVALUATION,
+    description: 'ROC 曲线下面积',
+    params: {
+      metric_type: { type: 'string', default: 'roc_auc', description: '指标类型' },
+      average: { type: 'string', default: 'macro', description: '平均方式' },
+    },
+    handles: {
+      inputs: [
+        { id: 'predictions', position: 'left', label: 'predictions' },
+        { id: 'targets', position: 'bottom', label: 'targets' },
+      ],
       outputs: [{ id: HandleIds.OUTPUT, position: 'right', label: 'output' }],
     },
     isComposite: false,

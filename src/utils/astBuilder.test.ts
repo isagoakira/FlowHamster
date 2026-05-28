@@ -3,7 +3,7 @@
  * Covers: graph pruning, edge handling, block name generation
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect } from 'vitest'
 import { buildAST } from './astBuilder'
 import { FlowHamsterNode, FlowHamsterEdge } from '../types/graph'
 
@@ -77,8 +77,9 @@ describe('astBuilder', () => {
       const addBlock = result.blocks.find(b => b.nodeId === 'add')
       expect(addBlock).toBeDefined()
       // Both inputs should be captured (one in 'a', one in 'b')
-      expect((addBlock.inputs as any).a).toBeTruthy()
-      expect((addBlock.inputs as any).b).toBeTruthy()
+      expect(addBlock).toBeDefined()
+      expect((addBlock!.inputs as any).a).toBeTruthy()
+      expect((addBlock!.inputs as any).b).toBeTruthy()
     })
 
     it('should handle diamond dependencies', () => {
@@ -182,7 +183,7 @@ describe('astBuilder', () => {
       // Conv2d needs input connection to not be pruned
       const edges: FlowHamsterEdge[] = []
 
-      const result = buildAST(nodes, edges)
+      buildAST(nodes, edges)
 
       // Isolated nodes get pruned - need to use connected graph
       // This test verifies the param propagation when nodes ARE included
