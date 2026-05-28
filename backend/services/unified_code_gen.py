@@ -246,6 +246,7 @@ def get_block_name_token(block: "NodeBlock") -> str:
 
 # 操作类型常数
 INLINE_AUX_CLASSES = frozenset({"selfattention", "crossattention", "mamba", "mlp", "ffn", "droppath"})
+SOURCE_NODE_TYPES = frozenset({"input", "constant", "parameter"})
 
 # Edge handle constants
 HANDLE_RESULT = "result"
@@ -298,6 +299,7 @@ register("batchnorm2d",{},                          {"result": "tensor"}, "modul
 register("layernorm",{},                             {"result": "tensor"}, "module")
 register("groupnorm",{},                             {"result": "tensor"}, "module")
 register("dropout",  {},                              {"result": "tensor"}, "module")
+register("droppath", {},                              {"result": "tensor"}, "module")
 register("softmax",  {},                              {"result": "tensor"}, "module")
 register("flatten",  {},                              {"result": "tensor"}, "module")
 register("selfattention",{},                        {"result": "tensor"}, "module")
@@ -320,6 +322,11 @@ register("reshape",  {},                              {"result": "tensor"}, "ope
 register("transpose",{},                              {"result": "tensor"}, "operation")
 register("split",    {},                              {"result": "tensor"}, "operation")
 register("slice",    {},                              {"result": "tensor"}, "operation")
+register("permute",  {},                              {"result": "tensor"}, "operation")
+register("squeeze",  {},                              {"result": "tensor"}, "operation")
+register("expand",   {},                              {"result": "tensor"}, "operation")
+register("constant", {},                              {"result": "tensor"}, "operation")
+register("parameter",{},                              {"result": "tensor"}, "module")
 
 # 训练组件（只出现在训练脚本，不参与 nn.Module 定义）
 register("adam",     {},                              {"result": "tensor"}, "training")
@@ -328,6 +335,8 @@ register("sgd",      {},                              {"result": "tensor"}, "tra
 register("rmsprop",  {},                              {"result": "tensor"}, "training")
 register("crossentropyloss",{},                      {"result": "tensor"}, "training")
 register("mseloss",  {},                              {"result": "tensor"}, "training")
+register("focalloss",{},                             {"result": "tensor"}, "training")
+register("labelsmoothing",{},                        {"result": "tensor"}, "training")
 register("cosineannealinglr",{},                     {"result": "tensor"}, "training")
 register("steplr",   {},                              {"result": "tensor"}, "training")
 register("reducelronplateau",{},                     {"result": "tensor"}, "training")
@@ -367,6 +376,7 @@ MODULE_IMPORT_MAP = {
     "layernorm": {"source": "torch.nn", "class_name": "LayerNorm"},
     "groupnorm": {"source": "torch.nn", "class_name": "GroupNorm"},
     "dropout": {"source": "torch.nn", "class_name": "Dropout"},
+    "droppath": {"source": "inline", "class_name": "DropPath"},
     "softmax": {"source": "torch.nn", "class_name": "Softmax"},
     "flatten": {"source": "torch.nn", "class_name": "Flatten"},
     "embedding": {"source": "torch.nn", "class_name": "Embedding"},
@@ -380,6 +390,7 @@ MODULE_IMPORT_MAP = {
     "mamba": {"source": "inline", "class_name": "Mamba"},
     "ffn": {"source": "inline", "class_name": "FFN"},
     "mlp": {"source": "inline", "class_name": "MLP"},
+    "parameter": {"source": "torch.nn", "class_name": "Parameter"},
 }
 
 
@@ -468,13 +479,13 @@ def _prune_graph(flow_json: dict, options: dict | None = None) -> tuple[set[str]
         tgt_type = normalize_node_type(tgt_node.get("data", {}).get("nodeType", ""))
         if tgt_type == "output":
             output_ids.add(e["target"])
-        if src_type == "input":
+        if src_type in SOURCE_NODE_TYPES:
             input_ids.add(e["source"])
 
     # 扩展 input_ids / output_ids 到所有孤立但存在的节点
     for n in all_nodes:
         nt = normalize_node_type(n.get("data", {}).get("nodeType", ""))
-        if nt == "input":
+        if nt in SOURCE_NODE_TYPES:
             input_ids.add(n["id"])
         if nt == "output":
             output_ids.add(n["id"])
@@ -530,6 +541,17 @@ def _prune_graph(flow_json: dict, options: dict | None = None) -> tuple[set[str]
 
 # ── AST build ─────────────────────────────────────────────────────────────────
 
+def _normalize_target_handle(op_type: str, target_handle: str) -> str:
+    """Map frontend handle ids to backend generator input names."""
+    if op_type == "crossattention" and target_handle in ("tgt", "query"):
+        return "q"
+    if op_type == "transformerdecoder" and target_handle in ("mem", "memory"):
+        return "memory"
+    if op_type == "transformerencoder" and target_handle == "x":
+        return "src"
+    return target_handle
+
+
 def build_ast(flow_json: dict, options: dict | None = None) -> list[NodeBlock]:
     _, pruned = _prune_graph(flow_json, options)
     block_map: dict[str, NodeBlock] = {}
@@ -562,7 +584,7 @@ def build_ast(flow_json: dict, options: dict | None = None) -> list[NodeBlock]:
             continue
 
         src_handle = edge.get("sourceHandle", "result")
-        tgt_handle = edge.get("targetHandle", "a")
+        tgt_handle = _normalize_target_handle(tgt.op_type, edge.get("targetHandle", "a"))
         ref = f"node:{src_id}/{src_handle}"
 
         if tgt.op_type == "concat":
@@ -659,6 +681,24 @@ def _resolve(ref, all_blocks):
 
 # ── Code generation ───────────────────────────────────────────────────────────
 
+def _shape_args(value, default: str = "1") -> str:
+    if value in (None, ""):
+        value = default
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    text = str(value).strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1]
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return text or default
+
+
+def _mamba_dt_rank_arg(value) -> str:
+    if value in (None, "", 0, "0", "auto"):
+        return repr("auto")
+    return str(value)
+
 
 def _gen_init(block: NodeBlock) -> Optional[str]:
     if block.category != "module":
@@ -702,6 +742,8 @@ def _gen_init(block: NodeBlock) -> Optional[str]:
         return "self." + name + " = nn.GroupNorm(num_groups=" + str(f.get("num_groups", 1)) + ", num_channels=" + str(f.get("num_channels", 0)) + ")"
     if block.op_type == "dropout":
         return "self." + name + " = nn.Dropout(p=" + str(f.get("p", 0.5)) + ", inplace=True)"
+    if block.op_type == "droppath":
+        return "self." + name + " = DropPath(drop_prob=" + str(f.get("p", f.get("drop_prob", 0.1))) + ")"
     if block.op_type == "softmax":
         return "self." + name + " = nn.Softmax(dim=" + str(f.get("dim", -1)) + ")"
     if block.op_type == "flatten":
@@ -711,7 +753,7 @@ def _gen_init(block: NodeBlock) -> Optional[str]:
     if block.op_type == "selfattention":
         return "self." + name + " = SelfAttention(dim=" + str(f.get("embed_dim", 512)) + ", heads=" + str(f.get("num_heads", 8)) + ")"
     if block.op_type == "crossattention":
-        return "self." + name + " = CrossAttention(dim=" + str(f.get("embed_dim", 512)) + ", heads=" + str(f.get("num_heads", 8)) + ")"
+        return "self." + name + " = CrossAttention(dim=" + str(f.get("query_dim", f.get("embed_dim", 512))) + ", heads=" + str(f.get("num_heads", 8)) + ")"
     if block.op_type == "multiheadattention":
         return "self." + name + " = nn.MultiheadAttention(embed_dim=" + str(f.get("embed_dim", 512)) + ", num_heads=" + str(f.get("num_heads", 8)) + ", dropout=" + str(f.get("dropout", 0)) + ", batch_first=True)"
     if block.op_type == "ffn":
@@ -739,7 +781,7 @@ def _gen_init(block: NodeBlock) -> Optional[str]:
         d_state = str(f.get("d_state", 16))
         d_conv = str(f.get("d_conv", 4))
         expand = str(f.get("expand", 2))
-        dt_rank = str(f.get("dt_rank", "auto"))
+        dt_rank = _mamba_dt_rank_arg(f.get("dt_rank", "auto"))
         dropout = str(f.get("dropout", 0.0))
         return ("self." + name + " = Mamba(d_model=" + d + ", d_state=" + d_state + ", d_conv=" + d_conv
                 + ", expand=" + expand + ", dt_rank=" + dt_rank + ", dropout=" + dropout + ", n_layers=" + n_layers + ")")
@@ -753,6 +795,10 @@ def _gen_init(block: NodeBlock) -> Optional[str]:
     if block.op_type == "instnorm":
         nc = str(f.get("num_channels", 64))
         return "self." + name + " = nn.InstanceNorm2d(num_features=" + nc + ")"
+    if block.op_type == "parameter":
+        shape = _shape_args(f.get("shape", "1"))
+        trainable = "True" if f.get("trainable", True) else "False"
+        return "self." + name + " = nn.Parameter(torch.zeros(" + shape + "), requires_grad=" + trainable + ")"
     return None
 
 
@@ -761,6 +807,9 @@ def _gen_forward(block: NodeBlock, all_blocks: list) -> Optional[str]:
 
     if block.op_type == "input":
         return "        " + vid + " = x"
+
+    if block.op_type == "parameter":
+        return "        " + vid + " = self." + vid
 
     if block.op_type == "output":
         src = _resolve(block.inputs.get("x"), all_blocks)
@@ -789,7 +838,11 @@ def _gen_forward(block: NodeBlock, all_blocks: list) -> Optional[str]:
             if len(all_srcs) == 1:
                 return "        " + vid + " = " + all_srcs[0]
             return None
-        if block.op_type in ("reshape", "transpose", "split", "slice", "upsample"):
+        if block.op_type == "constant":
+            shape = _shape_args(block.fields.get("shape", "1"))
+            value = block.fields.get("value", 0)
+            return "        " + vid + " = torch.full((" + shape + ",), " + str(value) + ", device=x.device, dtype=x.dtype)"
+        if block.op_type in ("reshape", "transpose", "split", "slice", "permute", "squeeze", "expand", "upsample"):
             first_ref = None
             for v in block.inputs.values():
                 if v:
@@ -807,6 +860,13 @@ def _gen_forward(block: NodeBlock, all_blocks: list) -> Optional[str]:
             if block.op_type == "slice":
                 s, e, st = str(block.fields.get("start", 0)), str(block.fields.get("end", -1)), str(block.fields.get("step", 1))
                 return "        " + vid + " = " + up + "[" + s + ":" + e + ":" + st + "]"
+            if block.op_type == "permute":
+                return "        " + vid + " = " + up + ".permute(" + str(block.fields.get("dims", "0,2,1")) + ")"
+            if block.op_type == "squeeze":
+                dim = block.fields.get("dim", None)
+                return "        " + vid + " = " + up + ".squeeze()" if dim in (None, "") else "        " + vid + " = " + up + ".squeeze(dim=" + str(dim) + ")"
+            if block.op_type == "expand":
+                return "        " + vid + " = " + up + ".expand(" + _shape_args(block.fields.get("shape", "-1"), "-1") + ")"
             if block.op_type == "upsample":
                 size = block.fields.get("size", None)
                 scale_factor = block.fields.get("scale_factor", 2.0)
@@ -835,7 +895,7 @@ def _gen_forward(block: NodeBlock, all_blocks: list) -> Optional[str]:
             q = _resolve(block.inputs.get("q"), all_blocks) if block.inputs.get("q") else up
             k = _resolve(block.inputs.get("k"), all_blocks) if block.inputs.get("k") else up
             v = _resolve(block.inputs.get("v"), all_blocks) if block.inputs.get("v") else up
-            return "        " + vid + " = self." + vid + "(" + q + ", " + k + ", " + v + ")"
+            return "        " + vid + " = self." + vid + "(" + q + ", " + k + ", " + v + ")[0]"
         if block.op_type == "transformerencoder":
             src = _resolve(block.inputs.get("src"), all_blocks) if block.inputs.get("src") else up
             return "        " + vid + " = self." + vid + "(" + src + ")"
@@ -908,6 +968,15 @@ def _gen_training(block: NodeBlock, all_blocks: list) -> list[str]:
         reduction = f.get("reduction", "mean")
         lines.append(f"    # MSELoss: {name}")
         lines.append(f"    criterion_{name} = nn.MSELoss(reduction='{reduction}')")
+    elif op == "focalloss":
+        alpha = f.get("alpha", 0.25)
+        gamma = f.get("gamma", 2.0)
+        lines.append(f"    # FocalLoss: {name}")
+        lines.append(f"    criterion_{name} = FocalLoss(alpha={alpha}, gamma={gamma})")
+    elif op == "labelsmoothing":
+        smoothing = f.get("smoothing", 0.1)
+        lines.append(f"    # LabelSmoothing: {name}")
+        lines.append(f"    criterion_{name} = nn.CrossEntropyLoss(label_smoothing={smoothing})")
     elif op == "cosineannealinglr":
         T_max = f.get("T_max", 10)
         eta_min = f.get("eta_min", 0.0)
@@ -1361,6 +1430,8 @@ class FlowHamsterModel(nn.Module):
         training_enabled = opts.get("training_nodes", False)
         if training_enabled:
             training_blocks_for_main = [b for b in self.sorted_blocks if b.category == "training"]
+            if any(block.op_type == "focalloss" for block in training_blocks_for_main):
+                custom_class_lines.append(LOSS_CUSTOM_CLASSES["focal"])
             optimizer_vars = [
                 f"optimizer_{block.output_var}"
                 for block in training_blocks_for_main

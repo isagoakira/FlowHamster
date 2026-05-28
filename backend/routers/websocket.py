@@ -8,7 +8,7 @@ WebSocket 与 HTTP 不同，是持久连接，适用于需要即时反馈的场�
 客户端发送 JSON，服务器返回 JSON。
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from backend.services.ast_core import generate
+from backend.services.codegen_facade import generate_full
 import json
 
 router = APIRouter()
@@ -37,7 +37,7 @@ async def ws_code(ws: WebSocket):
             payload = json.loads(data)
             nodes = payload.get("nodes", [])
             edges = payload.get("edges", [])
-            code = generate({"nodes": nodes, "edges": edges})
+            code = generate_full({"nodes": nodes, "edges": edges})
             await ws.send_text(json.dumps({"code": code}))
         except WebSocketDisconnect:
             break

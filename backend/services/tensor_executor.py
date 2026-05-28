@@ -1,6 +1,6 @@
 """
 Tensor Executor — 执行图的 forward pass，返回每个节点的输出统计信息。
-复用了 ast_core.generate 的 SIGNATURES 和构建逻辑。
+复用了统一代码生成器的 SIGNATURES 和构建逻辑。
 """
 from __future__ import annotations
 import torch
@@ -12,8 +12,7 @@ import json
 from collections import deque
 from functools import lru_cache
 
-# Import SIGNATURES and build_ast from ast_core
-from backend.services import ast_core
+from backend.services import codegen_facade
 
 
 def _graph_key(flow_json: dict) -> str:
@@ -29,6 +28,30 @@ def _graph_key(flow_json: dict) -> str:
 # Simple model cache: key → (model, node_var_map)
 _model_cache: dict[str, tuple[nn.Module, dict[str, str]]] = {}
 _MAX_CACHE = 8
+
+
+def _validate_flow_json(flow_json: dict) -> None:
+    nodes = flow_json.get("nodes")
+    edges = flow_json.get("edges")
+    if not isinstance(nodes, list) or not nodes:
+        raise ValueError("Invalid graph: nodes must be a non-empty list")
+    if not isinstance(edges, list):
+        raise ValueError("Invalid graph: edges must be a list")
+
+    node_ids: set[str] = set()
+    for node in nodes:
+        node_id = node.get("id") if isinstance(node, dict) else None
+        if not node_id:
+            raise ValueError("Invalid graph: every node must include an id")
+        node_ids.add(node_id)
+
+    for edge in edges:
+        if not isinstance(edge, dict):
+            raise ValueError("Invalid graph: every edge must be an object")
+        source = edge.get("source")
+        target = edge.get("target")
+        if source not in node_ids or target not in node_ids:
+            raise ValueError(f"Invalid graph: edge references missing node ({source} -> {target})")
 
 
 def _tensor_stats(t: torch.Tensor) -> dict:
@@ -56,18 +79,19 @@ def _build_model_from_flow(flow_json: dict) -> tuple[nn.Module, dict[str, str]]:
     if key in _model_cache:
         _, node_var_map = _model_cache[key]
         # Re-instantiate to avoid batchnorm/dropout state issues
-        code = ast_core.generate(flow_json)
-        namespace = {"torch": torch, "nn": nn}
+        code = codegen_facade.generate_model(flow_json)
+        namespace = {"__name__": "__tensor_executor__", "torch": torch, "nn": nn}
         exec(compile(code, "<tensor_executor>", "exec"), namespace)
         model_class = namespace["FlowHamsterModel"]
         model = model_class()
         return model, node_var_map
 
     # 1. 生成模型代码
-    code = ast_core.generate(flow_json)
+    code = codegen_facade.generate_model(flow_json)
 
     # 2. 构造执行命名空间（包含所有需要的 torch 符号）
     namespace = {
+        "__name__": "__tensor_executor__",
         "torch": torch,
         "nn": nn,
     }
@@ -80,7 +104,7 @@ def _build_model_from_flow(flow_json: dict) -> tuple[nn.Module, dict[str, str]]:
     model = model_class()
 
     # 5. 构建 node_id → output_var 映射
-    sorted_blocks = ast_core.build_ast(flow_json)
+    sorted_blocks = codegen_facade.build_ast(flow_json)
     node_var_map: dict[str, str] = {}
     for blk in sorted_blocks:
         if blk.node_id and not blk.node_id.startswith("_icat_"):
@@ -113,6 +137,7 @@ def execute_forward(flow_json: dict, input_shape: list[int] | None = None) -> di
     """
     if input_shape is None:
         input_shape = [1, 3, 224, 224]
+    _validate_flow_json(flow_json)
 
     # 1. 构建模型
     model, node_var_map = _build_model_from_flow(flow_json)

@@ -18,7 +18,7 @@ Response:
 """
 from fastapi import APIRouter
 from pydantic import BaseModel
-from backend.services.unified_code_gen import generate
+from backend.services.codegen_facade import generate_full
 from backend.services.dataflow_compiler import compile_dataflow
 
 router = APIRouter()
@@ -89,7 +89,7 @@ async def generate_code(req: GenerateRequest):
         options = dict(req.options or {})
         if req.training_config is not None:
             options["training_config"] = req.training_config
-        code = generate(req.graph, options=options)
+        code = generate_full(req.graph, options=options)
 
         # 如果有 data_graph 或 bindings，追加数据流 scaffold
         workflow_scaffold = _build_workflow_scaffold(

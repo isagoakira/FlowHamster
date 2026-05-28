@@ -71,7 +71,7 @@ from services.run_database import (
 
 # Alias to avoid name collision with local function
 get_run = _get_run
-from services.unified_code_gen import UnifiedCodeGenerator
+from services.codegen_facade import generate_model
 
 init_db()
 
@@ -114,8 +114,7 @@ def generate_train_script(
     graph = workflow_doc.get("modelGraph", workflow_doc.get("graph", {}))
 
     # Generate model code
-    gen = UnifiedCodeGenerator(graph)
-    model_code = gen.generate_model()
+    model_code = generate_model(graph)
 
     # Extract dataset path info
     data_config = training_config.get("dataConfig", {})
