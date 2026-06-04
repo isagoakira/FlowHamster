@@ -35,6 +35,14 @@ export type DataNodeType =
   | 'random_erasing'
   | 'gaussian_blur'
   | 'grayscale'
+  // === Advanced Augmentation ===
+  | 'mixup'
+  | 'cutmix'
+  | 'autoaugment'
+  | 'randaugment'
+  | 'cutout'
+  | 'posterize'
+  | 'solarize'
   // === Compose ===
   | 'compose'
   // === Data Organization ===
@@ -76,6 +84,17 @@ export type DataNodeType =
   | 'tensor_slice'
   | 'tensor_stack'
   | 'tensor_cat'
+  // === Multi-source Synthesis ===
+  | 'zip_datasets'
+  | 'interleave_datasets'
+  | 'sample_from_datasets'
+  // === Feature Engineering ===
+  | 'standard_scaler'
+  | 'minmax_scaler'
+  | 'pca'
+  | 'normalize_features'
+  | 'fill_missing_values'
+  | 'one_hot_encode'
   // === Output ===
   | 'dataset_output'
   | 'cache'
