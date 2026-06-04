@@ -358,6 +358,9 @@ register("mul",      {"a":{},"b":{}},                {"result": "tensor"}, "oper
 register("concat",   {},                              {"result": "tensor"}, "operation")  # 多输入！
 register("reshape",  {},                              {"result": "tensor"}, "operation")
 register("transpose",{},                              {"result": "tensor"}, "operation")
+register("permute",  {},                              {"result": "tensor"}, "operation")
+register("squeeze",  {},                              {"result": "tensor"}, "operation")
+register("expand",   {},                              {"result": "tensor"}, "operation")
 register("split",    {},                              {"result": "tensor"}, "operation")
 register("slice",    {},                              {"result": "tensor"}, "operation")
 
@@ -368,6 +371,8 @@ register("sgd",      {},                              {"result": "tensor"}, "tra
 register("rmsprop",  {},                              {"result": "tensor"}, "training")
 register("crossentropyloss",{},                      {"result": "tensor"}, "training")
 register("mseloss",  {},                              {"result": "tensor"}, "training")
+register("labelsmoothing",{},                        {"result": "tensor"}, "training")
+register("focalloss",{},                             {"result": "tensor"}, "training")
 register("cosineannealinglr",{},                     {"result": "tensor"}, "training")
 register("steplr",   {},                              {"result": "tensor"}, "training")
 register("reducelronplateau",{},                     {"result": "tensor"}, "training")
@@ -735,6 +740,14 @@ def _resolve(ref, all_blocks):
     return "x"
 
 
+def _format_arg_list(value, default) -> str:
+    if value is None or value == "":
+        value = default
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
 # ── Code generation ───────────────────────────────────────────────────────────
 
 
@@ -873,7 +886,7 @@ def _gen_forward(block: NodeBlock, all_blocks: list) -> Optional[str]:
             if len(all_srcs) == 1:
                 return "        " + vid + " = " + all_srcs[0]
             return None
-        if block.op_type in ("reshape", "transpose", "split", "slice", "upsample"):
+        if block.op_type in ("reshape", "transpose", "permute", "squeeze", "expand", "split", "slice", "upsample"):
             first_ref = None
             for v in block.inputs.values():
                 if v:
@@ -886,6 +899,16 @@ def _gen_forward(block: NodeBlock, all_blocks: list) -> Optional[str]:
                 return "        " + vid + " = " + up + ".reshape(" + up + ".size(0), " + str(shape) + ")"
             if block.op_type == "transpose":
                 return "        " + vid + " = " + up + ".transpose(" + str(block.fields.get("dim0", 0)) + ", " + str(block.fields.get("dim1", 1)) + ")"
+            if block.op_type == "permute":
+                dims = _format_arg_list(block.fields.get("dims"), "0,2,1")
+                return "        " + vid + " = " + up + ".permute(" + dims + ")"
+            if block.op_type == "squeeze":
+                dim = block.fields.get("dim", "")
+                dim_arg = "" if dim is None or dim == "" else str(dim)
+                return "        " + vid + " = " + up + ".squeeze(" + dim_arg + ")"
+            if block.op_type == "expand":
+                shape = _format_arg_list(block.fields.get("shape"), "-1")
+                return "        " + vid + " = " + up + ".expand(" + shape + ")"
             if block.op_type == "split":
                 return "        " + vid + " = " + up + ".split(" + str(block.fields.get("split_size", 32)) + ", dim=" + str(block.fields.get("dim", 0)) + ")"
             if block.op_type == "slice":
@@ -992,6 +1015,15 @@ def _gen_training(block: NodeBlock, all_blocks: list) -> list[str]:
         reduction = f.get("reduction", "mean")
         lines.append(f"    # MSELoss: {name}")
         lines.append(f"    criterion_{name} = nn.MSELoss(reduction='{reduction}')")
+    elif op == "labelsmoothing":
+        smoothing = f.get("smoothing", 0.1)
+        lines.append(f"    # LabelSmoothing loss: {name}")
+        lines.append(f"    criterion_{name} = nn.CrossEntropyLoss(label_smoothing={smoothing})")
+    elif op == "focalloss":
+        alpha = f.get("alpha", 1.0)
+        gamma = f.get("gamma", 2.0)
+        lines.append(f"    # FocalLoss: {name}")
+        lines.append(f"    criterion_{name} = FocalLoss(alpha={alpha}, gamma={gamma})")
     elif op == "cosineannealinglr":
         T_max = f.get("T_max", 10)
         eta_min = f.get("eta_min", 0.0)
@@ -1576,6 +1608,8 @@ class UnifiedCodeGenerator:
         training_enabled = opts.get("training_nodes", False)
         if training_enabled:
             training_blocks_for_main = [b for b in self.sorted_blocks if b.category == "training"]
+            if any(block.op_type == "focalloss" for block in training_blocks_for_main):
+                custom_class_lines.append(LOSS_CUSTOM_CLASSES["focal"])
             optimizer_vars = [
                 f"optimizer_{block.output_var}"
                 for block in training_blocks_for_main
