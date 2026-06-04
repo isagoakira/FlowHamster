@@ -343,10 +343,40 @@ ${workflowRuntimePrelude}
   }
 
   let customClassesBlock = ''
+  const emittedClassNames = new Set<string>()
+
   for (const cls of customClasses) {
     // 检查 cls.id（原始注册ID）、cls.name（模块名）、custom_${cls.name}（前缀形式）
     if (customClassIdsUsed.has(cls.id) || customClassIdsUsed.has(cls.name) || customClassIdsUsed.has(`custom_${cls.name}`)) {
-      customClassesBlock += `\n\n${generateCustomClassCode(cls)}`
+      const className = safePythonName(cls.name)
+      if (!emittedClassNames.has(className)) {
+        customClassesBlock += `\n\n${generateCustomClassCode(cls)}`
+        emittedClassNames.add(className)
+      }
+    }
+  }
+
+  // Also generate inline class definitions for custom nodes with internalStructure
+  // that are not available in localStorage (or to ensure they're always emitted)
+  for (const block of modelBlocks) {
+    const hasInternalStructure = block.fields?.internalStructure && Array.isArray(block.fields.internalStructure) && block.fields.internalStructure.length > 0
+    if (!hasInternalStructure) continue
+
+    if (block.opType === 'custom' || block.opType.startsWith('custom_')) {
+      const className = block.opType === 'custom'
+        ? safePythonName(block.fields?.customClassId || block.nodeId)
+        : safePythonName(block.opType)
+
+      if (!emittedClassNames.has(className)) {
+        const inlineCode = generateCustomClassCodeFromData(
+          className,
+          block.fields.internalStructure,
+          block.fields.internalEdges || [],
+          block.fields.outputVar || 'output'
+        )
+        customClassesBlock += `\n\n${inlineCode}`
+        emittedClassNames.add(className)
+      }
     }
   }
 
@@ -377,6 +407,7 @@ ${workflowRuntimePrelude}
 }
 
 // Import these at the bottom to avoid circular dependencies
-import { generateCustomClassCode, getAllCustomClasses } from './customCompositeRegistry'
+import { generateCustomClassCode, generateCustomClassCodeFromData, getAllCustomClasses } from './customCompositeRegistry'
+import { safePythonName } from './pythonNodeRegistry'
 import { getCompositeNodeDef } from './nodeRegistry'
 import { WorkflowBinding } from '../schema/workflowDocument'

@@ -149,8 +149,12 @@ function topologicalSort(nodes: SubModuleData[], edges: InternalEdgeData[]): str
  * Generate a clean, readable Python class for a custom composite module.
  * Handles branching correctly via Kahn topological sort.
  */
-export function generateCustomClassCode(cls: CustomCompositeClass): string {
-  const { name, internalStructure, internalEdges, outputVar } = cls
+export function generateCustomClassCodeFromData(
+  name: string,
+  internalStructure: SubModuleData[],
+  internalEdges: InternalEdgeData[],
+  outputVar: string
+): string {
   const className = safePythonName(name)
 
   if (internalStructure.length === 0) {
@@ -209,6 +213,15 @@ ${initLines.length > 0 ? initLines.join('\n') : '        pass'}
 
     def forward(self, x):
 ${fwdLines.join('\n')}`
+}
+
+export function generateCustomClassCode(cls: CustomCompositeClass): string {
+  return generateCustomClassCodeFromData(
+    cls.name,
+    cls.internalStructure,
+    cls.internalEdges,
+    cls.outputVar
+  )
 }
 
 /**
