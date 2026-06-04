@@ -68,8 +68,13 @@ const MODULE_INIT: Record<string, InitFactory> = {
   instnorm: ({ instanceName, fields }) => `self.${instanceName} = nn.InstanceNorm2d(num_features=${fields.num_channels ?? 64})`,
   parameter: ({ instanceName, fields }) => `self.${instanceName} = nn.Parameter(torch.zeros(${fields.shape ?? '1'}))`,
   custom: ({ instanceName, fields, customClassName }) => {
-    const className = customClassName ?? String(fields.customClassId ?? 'CustomModule')
-    const params = formatKwargs(fields, ['nodeType', 'label', 'customClassId', 'internalStructure', 'internalEdges'])
+    const className = safePythonName(customClassName ?? String(fields.customClassId ?? 'CustomModule'))
+    const params = formatKwargs(fields, [
+      'nodeType', 'label', 'customClassId', 'internalStructure', 'internalEdges',
+      'outputVar', 'isComposite', 'isCustomComposite', 'isExpanded',
+      'childNodeIds', 'internalEdgeIds', 'inputs', 'outputs',
+      'boundaryEdges', 'originClassId', 'customClassRegistryId',
+    ])
     return `self.${instanceName} = ${className}(${params})`
   },
 }

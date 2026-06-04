@@ -153,6 +153,63 @@ describe('codeGenerator', () => {
     expect(code).toContain('self.x_outer_0 = OuterBlock()')
   })
 
+  it('emits inline class definition for custom composite nodes not in localStorage', () => {
+    // Clear localStorage to simulate the bug scenario
+    localStorage.removeItem('flowhamster_custom_composites')
+
+    const nodes: FlowHamsterNode[] = [
+      {
+        id: 'input',
+        type: 'inputNode',
+        position: { x: 0, y: 0 },
+        data: { nodeType: 'input', label: 'Input', params: {} },
+      },
+      {
+        id: 'resblock_1',
+        type: 'customNode',
+        position: { x: 120, y: 0 },
+        data: {
+          nodeType: 'custom',
+          label: 'ResBlock',
+          params: {},
+          isComposite: true,
+          isCustomComposite: true,
+          customClassId: 'ResBlock',
+          isExpanded: false,
+          internalStructure: [
+            { id: 'conv1', type: 'conv2d', label: 'Conv1', params: { in_channels: 64, out_channels: 64, kernel_size: 3, padding: 1 } },
+            { id: 'relu1', type: 'relu', label: 'ReLU1', params: {} },
+          ],
+          internalEdges: [{ from: 'conv1', to: 'relu1' }],
+          outputVar: 'relu1',
+          inputs: [],
+          outputs: [],
+          childNodeIds: ['conv1', 'relu1'],
+          internalEdgeIds: ['conv1-relu1'],
+        },
+      },
+      {
+        id: 'output',
+        type: 'outputNode',
+        position: { x: 260, y: 0 },
+        data: { nodeType: 'output', label: 'Output', params: {} },
+      },
+    ]
+    const edges: FlowHamsterEdge[] = [
+      { id: 'input-to-resblock', source: 'input', target: 'resblock_1', sourceHandle: 'result', targetHandle: 'input_0' },
+      { id: 'resblock-to-output', source: 'resblock_1', target: 'output', sourceHandle: 'output_0', targetHandle: 'input' },
+    ]
+
+    const { code } = generateLocalCode(nodes, edges)
+
+    // The class definition must be present even without localStorage
+    expect(code).toContain('class ResBlock(nn.Module):')
+    expect(code).toContain('self.conv1 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1, bias=False)')
+    expect(code).toContain('self.relu1 = nn.ReLU()')
+    expect(code).toContain('self.x_ResBlock = ResBlock()')
+    expect(code).toContain('x_relu1 = self.relu1(x_conv1)')
+  })
+
   describe('composite loss handling', () => {
     it('should handle empty components array with fallback', () => {
       // This tests BUG-003 fix: composite loss with empty components should use fallback

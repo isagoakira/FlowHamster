@@ -10,7 +10,7 @@ import { SubModule, getCompositeNodeDef } from './nodeRegistry'
 import { getAllCustomClasses } from './customCompositeRegistry'
 import { getSourceNodeId } from './astBuilder'
 import { safeEvaluate, resolveStringTemplate } from './safeEval'
-import { genPythonNodeInit } from './pythonNodeRegistry'
+import { genPythonNodeInit, safePythonName } from './pythonNodeRegistry'
 
 // Feature toggles interface
 export interface FeatureToggles {
@@ -685,7 +685,7 @@ export function genInit(block: NodeBlock): string | null {
           c.name === customClassId ||
           `custom_${c.name}` === customClassId
         )
-        const className = customClass?.name ?? block.nodeId ?? 'CustomModule'
+        const className = safePythonName(customClass?.name ?? block.nodeId ?? 'CustomModule')
         const params = Object.entries(f)
           .filter(([k]) => !['nodeType', 'label', 'customClassId', 'internalStructure', 'internalEdges'].includes(k))
           .map(([k, v]) => `${k}=${pyLiteral(v)}`)

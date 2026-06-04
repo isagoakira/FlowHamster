@@ -83,6 +83,13 @@ export function buildAST(
       if ((n.data as any).internalStructure) {
         fields.internalStructure = (n.data as any).internalStructure
       }
+      // Include internalEdges and outputVar for inline class generation
+      if ((n.data as any).internalEdges) {
+        fields.internalEdges = (n.data as any).internalEdges
+      }
+      if ((n.data as any).outputVar) {
+        fields.outputVar = (n.data as any).outputVar
+      }
     }
     blockMap[n.id] = {
       nodeId: n.id, opType, category, fields,
