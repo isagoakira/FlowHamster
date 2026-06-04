@@ -19,7 +19,7 @@ import os
 import signal
 import sys
 
-from backend.services.dataflow_compiler import compile_dataflow
+from backend.services.code_generation import build_generation_options
 from backend.services.unified_code_gen import generate
 
 router = APIRouter(prefix="/execute", tags=["execute"])
@@ -120,20 +120,12 @@ def _build_executable_code(req: ExecuteRequest) -> str:
             runtime = training_config.setdefault("runtime", {})
             runtime["device"] = req.target_device
 
-    options: dict = {}
-    if training_config is not None:
-        options["training_config"] = training_config
-
-    if req.data_graph or req.bindings:
-        compiled = compile_dataflow(
-            model_graph=req.graph,
-            data_graph=req.data_graph,
-            bindings=req.bindings,
-            training_config=training_config,
-        )
-        if compiled.has_workflow_runtime:
-            options["workflow_scaffold"] = compiled.python_scaffold
-            options["workflow_runtime"] = compiled.has_workflow_runtime
+    options, _warnings = build_generation_options(
+        graph=req.graph,
+        training_config=training_config,
+        data_graph=req.data_graph,
+        bindings=req.bindings,
+    )
 
     return generate(req.graph, options=options)
 
