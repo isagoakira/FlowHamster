@@ -1,5 +1,6 @@
 /**
  * LLM API Service — Multi-vendor LLM provider management & chat completions
+ * Aligned with ISA-209 backend contract.
  */
 import { API_BASE_URL } from '../utils/runtimeConfig'
 
@@ -19,10 +20,38 @@ export interface LlmProvidersResponse {
   providers: LlmProvider[]
 }
 
-export interface ChatMessage {
-  role: 'system' | 'user' | 'assistant'
-  content: string
+/* ---------- Tool / Function Calling Types ---------- */
+
+export interface ToolFunction {
+  name: string
+  description?: string
+  parameters: Record<string, unknown>
 }
+
+export interface Tool {
+  type: 'function'
+  function: ToolFunction
+}
+
+export interface ToolCall {
+  id: string
+  type: 'function'
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
+/* ---------- Chat Message ---------- */
+
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool'
+  content: string
+  tool_calls?: ToolCall[]
+  tool_call_id?: string
+}
+
+/* ---------- Chat Completion Request ---------- */
 
 export interface ChatCompletionRequest {
   provider: string
@@ -31,18 +60,44 @@ export interface ChatCompletionRequest {
   temperature?: number
   max_tokens?: number
   stream?: boolean
+  tools?: Tool[]
+  tool_choice?: 'auto' | 'none' | { type: 'function'; function: { name: string } }
+  api_key?: string
+  extra?: Record<string, unknown>
+}
+
+/* ---------- Usage / Message in Response ---------- */
+
+export interface TokenUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+}
+
+export interface ResponseMessage {
+  role: string
+  content: string
+  tool_calls?: ToolCall[]
 }
 
 export interface ChatCompletionResponse {
   success: boolean
-  content?: string
+  provider?: string
+  model?: string
+  message?: ResponseMessage
+  usage?: TokenUsage
   error?: string
+  raw?: string
 }
+
+/* ---------- SSE Stream Types ---------- */
 
 export interface StreamChunk {
   type: 'chunk'
   provider: string
-  content: string
+  content?: string
+  event?: string
+  tool_calls?: ToolCall[]
 }
 
 export interface StreamDone {
@@ -51,6 +106,8 @@ export interface StreamDone {
 }
 
 export type StreamEvent = StreamChunk | StreamDone
+
+/* ---------- Provider / Key APIs ---------- */
 
 export async function fetchProviders(): Promise<LlmProvider[]> {
   const res = await fetch(`${API_BASE_URL}/llm/providers`)
@@ -81,6 +138,8 @@ export async function deleteApiKey(providerId: string): Promise<void> {
   }
 }
 
+/* ---------- Chat Completion (Non-streaming) ---------- */
+
 export async function sendChatCompletion(
   request: ChatCompletionRequest
 ): Promise<ChatCompletionResponse> {
@@ -95,10 +154,38 @@ export async function sendChatCompletion(
   return res.json()
 }
 
+/* ---------- Chat Completion (Streaming SSE) ---------- */
+
+function parseSsePayload(payload: string, defaultProvider: string): StreamEvent | null {
+  if (payload === '[DONE]') {
+    return { type: 'done', provider: defaultProvider }
+  }
+  try {
+    const event = JSON.parse(payload) as StreamEvent
+    if (event.type === 'chunk' || event.type === 'done') {
+      return event
+    }
+  } catch {
+    // ignore malformed JSON
+  }
+  return null
+}
+
+function flushBuffer(buffer: string, defaultProvider: string, onChunk: (event: StreamEvent) => void): string {
+  const lines = buffer.split('\n')
+  const remainder = lines.pop() ?? ''
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data: ')) continue
+    const event = parseSsePayload(trimmed.slice(6), defaultProvider)
+    if (event) onChunk(event)
+  }
+  return remainder
+}
+
 export async function streamChatCompletion(
   request: ChatCompletionRequest,
-  onChunk: (event: StreamEvent) => void,
-  onError?: (error: Error) => void
+  onChunk: (event: StreamEvent) => void
 ): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/llm/chat/completions`, {
     method: 'POST',
@@ -124,27 +211,14 @@ export async function streamChatCompletion(
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() ?? ''
-
-      for (const line of lines) {
-        const trimmed = line.trim()
-        if (!trimmed.startsWith('data: ')) continue
-        const payload = trimmed.slice(6)
-        if (payload === '[DONE]') {
-          onChunk({ type: 'done', provider: request.provider })
-          continue
-        }
-        try {
-          const event = JSON.parse(payload) as StreamEvent
-          onChunk(event)
-        } catch {
-          // ignore malformed SSE lines
-        }
-      }
+      buffer = flushBuffer(buffer, request.provider, onChunk)
     }
-  } catch (err) {
-    onError?.(err instanceof Error ? err : new Error(String(err)))
+
+    // Flush any remaining buffer after stream ends
+    if (buffer.trim()) {
+      const event = parseSsePayload(buffer.trim(), request.provider)
+      if (event) onChunk(event)
+    }
   } finally {
     reader.releaseLock()
   }
