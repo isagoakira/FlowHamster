@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from backend.schema.agent import AgentChatRequest, AgentChatResponse, AgentSessionDetail, AgentSessionInfo
+from backend.schema.agent import AgentChatRequest, AgentChatResponse, AgentConfirmRequest, AgentConfirmResponse, AgentSessionDetail, AgentSessionInfo
 from backend.services.agent_orchestrator import AgentOrchestrator
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -40,3 +40,8 @@ async def delete_agent_session(session_id: str):
     if not get_orchestrator().delete_session(session_id):
         raise HTTPException(status_code=404, detail="Agent session not found")
     return {"status": "ok"}
+
+
+@router.post("/confirm", response_model=AgentConfirmResponse)
+async def agent_confirm(req: AgentConfirmRequest):
+    return get_orchestrator().confirm(req)

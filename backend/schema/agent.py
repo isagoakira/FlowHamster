@@ -75,5 +75,20 @@ class AgentChatResponse(BaseModel):
     summary: str = ""
 
 
+class AgentConfirmRequest(BaseModel):
+    session_id: str
+    confirmation_token: str
+    action_results: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AgentConfirmResponse(BaseModel):
+    success: bool
+    session_id: str
+    reply: str = ""
+    tool_calls: list[AgentToolCall] = Field(default_factory=list)
+    observations: list[AgentObservation] = Field(default_factory=list)
+    error: str | None = None
+
+
 class AgentSessionDetail(AgentSessionInfo):
     messages: list[AgentMessage] = Field(default_factory=list)

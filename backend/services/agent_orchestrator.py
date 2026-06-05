@@ -14,6 +14,8 @@ from typing import Any, Iterator
 from backend.schema.agent import (
     AgentChatRequest,
     AgentChatResponse,
+    AgentConfirmRequest,
+    AgentConfirmResponse,
     AgentGraphContext,
     AgentMessage,
     AgentObservation,
@@ -291,6 +293,45 @@ class AgentOrchestrator:
             blocked=blocked,
             warnings=warnings,
             summary=summary,
+        )
+
+    def confirm(self, req: AgentConfirmRequest) -> AgentConfirmResponse:
+        session = self._get_or_create_session(req.session_id, "confirm")
+        tool_calls: list[AgentToolCall] = []
+        observations: list[AgentObservation] = []
+        reply = ""
+        blocked = False
+
+        if req.confirmation_token:
+            pending = self.store.pop_pending_action(session.id, req.confirmation_token)
+            if pending is None:
+                reply = "Confirmation token is invalid or expired. Please request the action again."
+                return AgentConfirmResponse(
+                    success=False,
+                    session_id=session.id,
+                    reply=reply,
+                    error="invalid_confirmation_token",
+                )
+            else:
+                calls, obs, reply, blocked = self._execute_pending_action(pending, None)
+                tool_calls.extend(calls)
+                observations.extend(obs)
+
+        self.store.add_message(session.id, "assistant", reply)
+        for observation in observations:
+            self.store.add_message(
+                session.id,
+                "tool",
+                json.dumps(observation.model_dump(), ensure_ascii=False),
+                tool_name=observation.tool_name,
+            )
+
+        return AgentConfirmResponse(
+            success=not blocked,
+            session_id=session.id,
+            reply=reply,
+            tool_calls=tool_calls,
+            observations=observations,
         )
 
     def list_sessions(self) -> list[AgentSessionInfo]:
