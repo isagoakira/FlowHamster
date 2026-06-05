@@ -4,8 +4,8 @@ from fastapi.testclient import TestClient
 from backend.routers import generate
 
 class AugmentationGapTest(unittest.TestCase):
-    def test_backend_generate_drops_augmentation_nodes_with_unknown_comment(self):
-        """Demonstrate that backend dataflow_compiler does not handle augmentation nodes."""
+    def test_backend_generate_emits_supported_augmentation_nodes(self):
+        """Backend dataflow_compiler emits supported image augmentation nodes."""
         app = FastAPI()
         app.include_router(generate.router, prefix="/api")
         client = TestClient(app)
@@ -51,11 +51,12 @@ class AugmentationGapTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(body["success"])
-        # Backend compiler does not know random_horizontal_flip, random_crop, normalize
-        # so it emits "# Unknown node type" comments for them.
-        self.assertIn("# Unknown node type: random_horizontal_flip", body["code"])
-        self.assertIn("# Unknown node type: random_crop", body["code"])
-        self.assertIn("# Unknown node type: normalize", body["code"])
+        self.assertIn("# Random Horizontal Flip (p=0.5)", body["code"])
+        self.assertIn("torch.flip(_field_image, dims=[2])", body["code"])
+        self.assertIn("# Random Crop (size=224, padding=4)", body["code"])
+        self.assertIn("_field_image = pad[:, top:top+224, left:left+224]", body["code"])
+        self.assertNotIn("# Unknown node type: random_horizontal_flip", body["code"])
+        self.assertNotIn("# Unknown node type: random_crop", body["code"])
 
 if __name__ == "__main__":
     unittest.main()

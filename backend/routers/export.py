@@ -12,7 +12,7 @@ import base64
 import nbformat
 from nbformat.v4 import new_notebook, new_code_cell, new_markdown_cell
 
-from backend.services.ast_core import generate as ast_generate
+from backend.services.codegen_facade import generate_notebook_code
 
 router = APIRouter()
 
@@ -174,26 +174,6 @@ class NotebookExportRequest(BaseModel):
     bindings: list[dict] | None = None
 
 
-def _build_workflow_scaffold(data_graph: dict | None, bindings: list[dict] | None, training_config: dict | None) -> str:
-    """构建数据流相关的 Python scaffold"""
-    if not data_graph and not bindings:
-        return ""
-
-    from backend.services.dataflow_compiler import compile_dataflow
-
-    compiled = compile_dataflow(
-        model_graph=None,
-        data_graph=data_graph,
-        bindings=bindings,
-        training_config=training_config,
-    )
-
-    if not compiled.has_workflow_runtime:
-        return ""
-
-    return f"\n\n{compiled.python_scaffold}\n"
-
-
 @router.post("/export-notebook", response_model=ExportResponse)
 async def export_notebook(req: NotebookExportRequest):
     """
@@ -211,23 +191,17 @@ async def export_notebook(req: NotebookExportRequest):
         ExportResponse: base64 编码的 .ipynb 文件内容
     """
     try:
-        # 1. 用 ast_core 生成完整代码
-        options = {"training_config": req.training_config} if req.training_config is not None else None
-        code = ast_generate(req.graph, options=options)
-
-        # 2. 如果有 data_graph 或 bindings，追加数据流 scaffold
-        workflow_scaffold = _build_workflow_scaffold(
-            req.data_graph,
-            req.bindings,
-            req.training_config
+        generated = generate_notebook_code(
+            graph=req.graph,
+            training_config=req.training_config,
+            data_graph=req.data_graph,
+            bindings=req.bindings,
         )
-        if workflow_scaffold:
-            code += workflow_scaffold
 
-        # 3. 拆分为多个 cell
-        cells = _split_code_into_cells(code)
+        # 1. 拆分为多个 cell
+        cells = _split_code_into_cells(generated.code)
 
-        # 4. 构建 notebook
+        # 2. 构建 notebook
         content = _build_notebook(cells)
         b64 = base64.b64encode(content.encode()).decode()
 

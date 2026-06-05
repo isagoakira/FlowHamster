@@ -13,6 +13,21 @@ from dataclasses import dataclass
 from typing import Optional
 from collections import defaultdict, deque
 
+
+@dataclass(frozen=True)
+class GeneratedCodeSections:
+    imports: str
+    reusable_classes: str
+    model: str
+    main: str
+
+    def render(self, include_main: bool = True) -> str:
+        parts = [self.imports, self.reusable_classes, self.model]
+        if include_main:
+            parts.append(self.main)
+        return "\n\n".join(part.rstrip() for part in parts if part and part.strip()).rstrip() + "\n"
+
+
 # ─────────────────────────────────────────────────────────────────
 # Inline auxiliary class generators (ported from code_gen_v2.py)
 # ─────────────────────────────────────────────────────────────────
@@ -308,6 +323,7 @@ register("transformerdecoder",{"embed_dim": {}, "num_heads": {}, "num_layers": {
 register("mamba",   {"d_model": {}},                {"result": "tensor"}, "module")
 register("ffn",      {},                              {"result": "tensor"}, "module")
 register("mlp",      {},                              {"result": "tensor"}, "module")
+register("composite", {"x": {}},                     {"result": "tensor"}, "module")
 register("lstm",     {"input_size": {}, "hidden_size": {}, "num_layers": {}}, {"result": "tensor"}, "module")
 register("instnorm", {"num_channels": {}},             {"result": "tensor"}, "module")
 register("upsample", {"size": {}},                     {"result": "tensor"}, "operation")
@@ -385,6 +401,7 @@ MODULE_IMPORT_MAP = {
     "mamba": {"source": "inline", "class_name": "Mamba"},
     "ffn": {"source": "inline", "class_name": "FFN"},
     "mlp": {"source": "inline", "class_name": "MLP"},
+    "composite": {"source": "inline", "class_name": "Composite"},
 }
 
 
@@ -405,6 +422,41 @@ def collect_module_imports(sorted_blocks: list) -> set:
 def collect_inline_classes(sorted_blocks: list) -> set:
     """收集需要生成的 inline 类（SelfAttention, CrossAttention, Mamba, MLP, FFN, DropPath）"""
     return {block.op_type for block in sorted_blocks if block.op_type in INLINE_AUX_CLASSES}
+
+
+def _safe_class_name(value: object, fallback: str = "FlowHamsterBlock") -> str:
+    raw = str(value or fallback)
+    chars = [ch if ch.isalnum() or ch == "_" else "_" for ch in raw]
+    name = "".join(chars).strip("_") or fallback
+    if not (name[0].isalpha() or name[0] == "_"):
+        name = f"{fallback}_{name}"
+    return name
+
+
+def _generate_composite_classes(sorted_blocks: list) -> str:
+    parts: list[str] = []
+    seen: set[str] = set()
+    for block in sorted_blocks:
+        if block.op_type != "composite":
+            continue
+        class_name = _safe_class_name(
+            block.fields.get("className") or block.fields.get("class_name") or block.fields.get("name"),
+            fallback=f"FlowHamsterComposite_{block.instance_name or block.output_var}",
+        )
+        subgraph = block.fields.get("subgraph")
+        if not isinstance(subgraph, dict) or class_name in seen:
+            continue
+        seen.add(class_name)
+        sub_code = UnifiedCodeGenerator(subgraph, {"evaluation_nodes": False, "training_nodes": False}).generate_model()
+        model_start = sub_code.find("class FlowHamsterModel")
+        if model_start == -1:
+            continue
+        prefix = sub_code[:model_start]
+        helper_start = prefix.find("class ")
+        helper_code = prefix[helper_start:].strip() if helper_start != -1 else ""
+        class_code = sub_code[model_start:].replace("class FlowHamsterModel", f"class {class_name}", 1).strip()
+        parts.append("\n\n".join(part for part in (helper_code, class_code) if part))
+    return "\n\n".join(parts)
 
 
 def gen_module_imports(custom_modules: set) -> str:
@@ -737,6 +789,12 @@ def _gen_init(block: NodeBlock) -> Optional[str]:
         outf = str(f.get("out_features", 10))
         depth = str(f.get("depth", 2))
         return "self." + name + " = MLP(dim=" + inf + ", hidden_dim=" + hdf + ", depth=" + depth + ", out_dim=" + outf + ")"
+    if block.op_type == "composite":
+        class_name = _safe_class_name(
+            f.get("className") or f.get("class_name") or f.get("name"),
+            fallback=f"FlowHamsterComposite_{block.instance_name or block.output_var}",
+        )
+        return "self." + name + " = " + class_name + "()"
     if block.op_type == "transformerencoder":
         d = str(f.get("embed_dim", f.get("d_model", 512))); nh = str(f.get("num_heads", f.get("nhead", 8)))
         dl = str(f.get("num_layers", 6)); dim_ff = str(f.get("dim_feedforward", 2048))
@@ -752,7 +810,7 @@ def _gen_init(block: NodeBlock) -> Optional[str]:
         d_state = str(f.get("d_state", 16))
         d_conv = str(f.get("d_conv", 4))
         expand = str(f.get("expand", 2))
-        dt_rank = str(f.get("dt_rank", "auto"))
+        dt_rank = _py_repr(f.get("dt_rank", "auto"))
         dropout = str(f.get("dropout", 0.0))
         return ("self." + name + " = Mamba(d_model=" + d + ", d_state=" + d_state + ", d_conv=" + d_conv
                 + ", expand=" + expand + ", dt_rank=" + dt_rank + ", dropout=" + dropout + ", n_layers=" + n_layers + ")")
@@ -1420,7 +1478,8 @@ class UnifiedCodeGenerator:
 
     def _collect_inline_classes(self) -> str:
         needed = collect_inline_classes(self.sorted_blocks)
-        return _generate_aux_classes(needed)
+        parts = [_generate_aux_classes(needed), _generate_composite_classes(self.sorted_blocks)]
+        return "\n\n".join(part for part in parts if part and part.strip())
 
     def _format_forward_block(self) -> tuple[str, str]:
         """Extract multi-output handling into one place. Returns (fwd_block, init_block)."""
@@ -1631,3 +1690,35 @@ def generate(flow_json: dict, options: dict | None = None) -> str:
     """
     gen = UnifiedCodeGenerator(flow_json, options)
     return gen.generate_full()
+
+
+def generate_sections(flow_json: dict, options: dict | None = None) -> GeneratedCodeSections:
+    """Generate full Python and expose coarse sections for route/export/notebook callers."""
+    code = generate(flow_json, options=options)
+    model_start = code.find("class FlowHamsterModel")
+    if model_start == -1:
+        return GeneratedCodeSections(imports=code.rstrip(), reusable_classes="", model="", main="")
+
+    before_model = code[:model_start]
+    first_class = before_model.find("class ")
+    if first_class == -1:
+        imports = before_model.rstrip()
+        reusable_classes = ""
+    else:
+        imports = before_model[:first_class].rstrip()
+        reusable_classes = before_model[first_class:].rstrip()
+
+    main_start = code.find('if __name__ == "__main__":', model_start)
+    if main_start == -1:
+        model = code[model_start:].rstrip()
+        main = ""
+    else:
+        model = code[model_start:main_start].rstrip()
+        main = code[main_start:].rstrip()
+
+    return GeneratedCodeSections(
+        imports=imports,
+        reusable_classes=reusable_classes,
+        model=model,
+        main=main,
+    )
