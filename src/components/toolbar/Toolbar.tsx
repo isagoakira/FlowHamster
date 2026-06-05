@@ -17,6 +17,7 @@ import { AllOutputsPanel } from './panels/AllOutputsPanel'
 import { TrainingConfigPanel } from './panels/TrainingConfigPanel'
 import { TrainingDashboard } from './panels/TrainingDashboard'
 import { BindingPanel } from './panels/BindingPanel'
+import { LLMSettings } from '../settings/LLMSettings'
 import {
   toolbarStyle,
   toolbarSecondaryStyle,
@@ -75,6 +76,7 @@ export function Toolbar() {
   const [showWorkflowDialog, setShowWorkflowDialog] = useState(false)
   const [showTrainingDashboard, setShowTrainingDashboard] = useState(false)
   const [showWorkflowOutput, setShowWorkflowOutput] = useState(false)
+  const [showLlmSettings, setShowLlmSettings] = useState(false)
   const [workflowOutput, setWorkflowOutput] = useState('')
   const [workflowExecutionError, setWorkflowExecutionError] = useState<string | null>(null)
   const [workflowExecutionLoading, setWorkflowExecutionLoading] = useState(false)
@@ -274,6 +276,7 @@ export function Toolbar() {
     setShowBindings(false)
     setShowTrainingDashboard(false)
     setShowWorkflowOutput(false)
+    setShowLlmSettings(false)
   }
 
   const handleClear = () => {
@@ -495,6 +498,15 @@ export function Toolbar() {
           🚀 Train
         </button>
 
+        {/* LLM Settings */}
+        <button
+          style={{ ...settingsBtnStyle, color: showLlmSettings ? '#88aaff' : '#555' }}
+          onClick={(e) => { e.stopPropagation(); setShowLlmSettings(!showLlmSettings) }}
+          title="LLM Provider Settings"
+        >
+          🤖
+        </button>
+
         {/* Settings */}
         <button
           style={{ ...settingsBtnStyle, color: showSettings ? '#88aaff' : '#555' }}
@@ -527,6 +539,13 @@ export function Toolbar() {
         <>
           <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowSettings(false)} />
           <SettingsPanel onClose={() => setShowSettings(false)} />
+        </>
+      )}
+
+      {showLlmSettings && (
+        <>
+          <div style={{ position: 'absolute', inset: 0, zIndex: 999 }} onClick={() => setShowLlmSettings(false)} />
+          <LLMSettings onClose={() => setShowLlmSettings(false)} />
         </>
       )}
 
