@@ -1,0 +1,623 @@
+{
+  "version": "2.0.0",
+  "metadata": {
+    "name": "LeNet-5",
+    "description": "LeNet-5 for MNIST handwritten digit classification",
+    "schemaVersion": "2.0.0",
+    "createdAt": "2026-06-03T14:58:55.992043+00:00",
+    "updatedAt": "2026-06-03T14:58:55.992051+00:00",
+    "exportSource": "flowhamster"
+  },
+  "modelGraph": {
+    "kind": "model",
+    "nodes": [
+      {
+        "id": "input",
+        "data": {
+          "nodeType": "input",
+          "label": "Input",
+          "params": {
+            "shape": "1,28,28",
+            "dtype": "float32"
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "type": "inputNode",
+        "style": {},
+        "width": 170,
+        "height": 129
+      },
+      {
+        "id": "conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv C6",
+          "params": {
+            "in_channels": 1,
+            "out_channels": 6,
+            "kernel_size": 5,
+            "stride": 1,
+            "padding": 0,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 300,
+          "y": 80
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 500,
+          "y": 80
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "pool1",
+        "data": {
+          "nodeType": "maxpool2d",
+          "label": "Pool",
+          "params": {
+            "kernel_size": 2,
+            "stride": 2
+          }
+        },
+        "position": {
+          "x": 700,
+          "y": 80
+        },
+        "type": "maxpool2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv C16",
+          "params": {
+            "in_channels": 6,
+            "out_channels": 16,
+            "kernel_size": 5,
+            "stride": 1,
+            "padding": 0,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 900,
+          "y": 80
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 80
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "pool2",
+        "data": {
+          "nodeType": "maxpool2d",
+          "label": "Pool",
+          "params": {
+            "kernel_size": 2,
+            "stride": 2
+          }
+        },
+        "position": {
+          "x": 1300,
+          "y": 80
+        },
+        "type": "maxpool2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "flat",
+        "data": {
+          "nodeType": "flatten",
+          "label": "Flatten",
+          "params": {
+            "start_dim": 1
+          }
+        },
+        "position": {
+          "x": 1500,
+          "y": 80
+        },
+        "type": "flattenNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "fc1",
+        "data": {
+          "nodeType": "linear",
+          "label": "FC 120",
+          "params": {
+            "in_features": 256,
+            "out_features": 120,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 1700,
+          "y": 80
+        },
+        "type": "linearNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "relu3",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1900,
+          "y": 80
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "fc2",
+        "data": {
+          "nodeType": "linear",
+          "label": "FC 84",
+          "params": {
+            "in_features": 120,
+            "out_features": 84,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 2100,
+          "y": 80
+        },
+        "type": "linearNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "relu4",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 2300,
+          "y": 80
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "fc3",
+        "data": {
+          "nodeType": "linear",
+          "label": "FC 10",
+          "params": {
+            "in_features": 84,
+            "out_features": 10,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 2500,
+          "y": 80
+        },
+        "type": "linearNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "output",
+        "data": {
+          "nodeType": "output",
+          "label": "Output",
+          "params": {}
+        },
+        "position": {
+          "x": 2700,
+          "y": 80
+        },
+        "type": "outputNode",
+        "style": {},
+        "width": 170,
+        "height": 93
+      }
+    ],
+    "edges": [
+      {
+        "id": "input:result->conv1:a",
+        "source": "input",
+        "target": "conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "conv1:result->relu1:a",
+        "source": "conv1",
+        "target": "relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "relu1:result->pool1:a",
+        "source": "relu1",
+        "target": "pool1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "pool1:result->conv2:a",
+        "source": "pool1",
+        "target": "conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "conv2:result->relu2:a",
+        "source": "conv2",
+        "target": "relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "relu2:result->pool2:a",
+        "source": "relu2",
+        "target": "pool2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "pool2:result->flat:a",
+        "source": "pool2",
+        "target": "flat",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "flat:result->fc1:a",
+        "source": "flat",
+        "target": "fc1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "fc1:result->relu3:a",
+        "source": "fc1",
+        "target": "relu3",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "relu3:result->fc2:a",
+        "source": "relu3",
+        "target": "fc2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "fc2:result->relu4:a",
+        "source": "fc2",
+        "target": "relu4",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "relu4:result->fc3:a",
+        "source": "relu4",
+        "target": "fc3",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "fc3:result->output:a",
+        "source": "fc3",
+        "target": "output",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      }
+    ],
+    "contract": {
+      "inputs": [
+        {
+          "name": "input_1",
+          "dtype": "float32",
+          "shapeHint": "1,28,28",
+          "semanticRole": "model_input",
+          "description": "Input"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output_1",
+          "semanticRole": "model_output",
+          "description": "Output"
+        }
+      ]
+    }
+  },
+  "dataGraph": {
+    "kind": "data",
+    "nodes": [
+      {
+        "id": "ds_src",
+        "data": {
+          "nodeType": "csv_source",
+          "label": "MNIST CSV",
+          "params": {
+            "path": "./data/mnist_train.csv",
+            "delimiter": ",",
+            "feature_columns": "pixel0,pixel1,...,pixel783",
+            "label_column": "label"
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "type": "csv_sourceNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_to_tensor",
+        "data": {
+          "nodeType": "to_tensor",
+          "label": "To Tensor",
+          "params": {}
+        },
+        "position": {
+          "x": 340,
+          "y": 80
+        },
+        "type": "to_tensorNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_scale",
+        "data": {
+          "nodeType": "scale",
+          "label": "Scale",
+          "params": {
+            "min": 0,
+            "max": 1
+          }
+        },
+        "position": {
+          "x": 580,
+          "y": 80
+        },
+        "type": "scaleNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_split",
+        "data": {
+          "nodeType": "train_val_split",
+          "label": "Train/Val Split",
+          "params": {
+            "train_ratio": 0.9,
+            "val_ratio": 0.1,
+            "seed": 42
+          }
+        },
+        "position": {
+          "x": 820,
+          "y": 80
+        },
+        "type": "train_val_splitNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_batch",
+        "data": {
+          "nodeType": "batch",
+          "label": "Batch",
+          "params": {
+            "batch_size": 64,
+            "drop_last": false
+          }
+        },
+        "position": {
+          "x": 1060,
+          "y": 80
+        },
+        "type": "batchNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_out",
+        "data": {
+          "nodeType": "dataset_output",
+          "label": "Dataset Output",
+          "params": {
+            "fields": "image,label"
+          }
+        },
+        "position": {
+          "x": 1300,
+          "y": 80
+        },
+        "type": "dataset_outputNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      }
+    ],
+    "edges": [
+      {
+        "id": "ds_src:result->ds_to_tensor:a",
+        "source": "ds_src",
+        "target": "ds_to_tensor",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_to_tensor:result->ds_scale:a",
+        "source": "ds_to_tensor",
+        "target": "ds_scale",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_scale:result->ds_split:a",
+        "source": "ds_scale",
+        "target": "ds_split",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_split:result->ds_batch:a",
+        "source": "ds_split",
+        "target": "ds_batch",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_batch:result->ds_out:a",
+        "source": "ds_batch",
+        "target": "ds_out",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      }
+    ],
+    "contract": {
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "semanticRole": "data_output",
+          "description": "Dataset Output"
+        },
+        {
+          "name": "label",
+          "semanticRole": "data_output",
+          "description": "Dataset Output"
+        }
+      ]
+    }
+  },
+  "trainingConfig": {
+    "taskType": "classification",
+    "loss": {
+      "type": "cross_entropy",
+      "enabled": true,
+      "params": {}
+    },
+    "optimizer": {
+      "type": "sgd",
+      "enabled": true,
+      "params": {
+        "lr": 0.01,
+        "momentum": 0.9,
+        "weight_decay": 0
+      }
+    },
+    "scheduler": {
+      "type": "step_lr",
+      "enabled": true,
+      "params": {
+        "step_size": 10,
+        "gamma": 0.1
+      }
+    },
+    "metrics": [
+      {
+        "type": "accuracy",
+        "enabled": true,
+        "params": {}
+      }
+    ],
+    "runtime": {
+      "device": "auto",
+      "epochs": 20,
+      "batchSize": 64,
+      "amp": false,
+      "gradClip": null,
+      "numWorkers": 4
+    },
+    "checkpoint": {
+      "enabled": true,
+      "saveTopK": 1,
+      "monitor": "val_loss",
+      "mode": "min",
+      "earlyStopPatience": null
+    }
+  },
+  "bindings": [
+    {
+      "id": "b1",
+      "sourceGraph": "data",
+      "sourceKey": "image",
+      "target": "model_input",
+      "targetKey": "input_1",
+      "description": "image -> model input"
+    },
+    {
+      "id": "b2",
+      "sourceGraph": "data",
+      "sourceKey": "label",
+      "target": "training_target",
+      "targetKey": "target",
+      "description": "label -> training target"
+    }
+  ]
+}

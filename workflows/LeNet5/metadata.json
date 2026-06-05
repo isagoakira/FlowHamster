@@ -1,0 +1,7 @@
+{
+  "id": "LeNet5",
+  "name": "LeNet-5",
+  "description": "LeNet-5 for MNIST handwritten digit classification",
+  "created_at": 1780498735.993433,
+  "updated_at": 1780498735.993449
+}

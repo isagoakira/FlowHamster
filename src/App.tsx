@@ -9,6 +9,8 @@ import { useGraphStore } from './hooks/useGraphStore'
 import DataSidebar from './components/data/DataSidebar'
 import DataCanvas from './components/data/DataCanvas'
 import DataPreview from './components/data/DataPreview'
+import { AgentChatPanel } from './components/agentChat/AgentChatPanel'
+import { AgentChatToggle } from './components/agentChat/AgentChatToggle'
 
 const appStyle: React.CSSProperties = {
   display: 'flex',
@@ -44,6 +46,8 @@ export default function App() {
         </ErrorBoundary>
       </div>
       {workspaceMode === 'model' && <WorkflowSettingsBar />}
+      <AgentChatToggle />
+      <AgentChatPanel />
     </div>
   )
 }

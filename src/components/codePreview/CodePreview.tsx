@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useGraphStore } from '../../hooks/useGraphStore'
 import { useDataGraphStore } from '../../hooks/useDataGraphStore'
-import { getCachedOrGenerateCode } from '../../utils/cachedCodeGenerator'
+import { getCachedOrGenerateCode, getCachedOrGenerateCodeBackend } from '../../utils/cachedCodeGenerator'
 import { useWebSocketCode } from '../../hooks/useWebSocketCode'
 import { API_BASE_URL, HEALTH_URL } from '../../utils/runtimeConfig'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
@@ -15,6 +15,8 @@ interface CodePreviewProps {
 const MIN_WIDTH = 200
 const MAX_WIDTH = 800
 
+type CodeSource = 'backend' | 'offline' | 'ws' | 'loading'
+
 export default function CodePreview({ width = 320, onWidthChange }: CodePreviewProps) {
   const [panelWidth, setPanelWidth] = useState(width)
   const [isResizing, setIsResizing] = useState(false)
@@ -25,6 +27,8 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
   const [copySuccess, setCopySuccess] = useState('')
   const backendAvailable = useRef(false)
   const [localCode, setLocalCode] = useState('')
+  const [backendCode, setBackendCode] = useState('')
+  const [codeSource, setCodeSource] = useState<CodeSource>('loading')
 
   const nodes = useGraphStore((s) => s.nodes)
   const edges = useGraphStore((s) => s.edges)
@@ -120,7 +124,7 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
       .catch(() => { backendAvailable.current = false })
   }, [])
 
-  // Generate local code when nodes change
+  // Generate local code when nodes change (offline fallback)
   useEffect(() => {
     try {
       if (nodes.length === 0) {
@@ -134,12 +138,41 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
       })
       setLocalCode(code)
     } catch (e: any) {
-      console.error('Code generation failed:', e)
-      setLocalCode(`# Code generation failed\n# ${e?.message || 'Unknown error'}`)
+      console.error('Local code generation failed:', e)
+      setLocalCode(`# Local code generation failed\n# ${e?.message || 'Unknown error'}`)
     }
   }, [nodes, edges, features, trainingConfig, dataNodes, dataEdges, bindings])
 
-  const displayCode = wsEnabled && wsCode ? wsCode : localCode
+  // Generate backend code when nodes change (default path)
+  useEffect(() => {
+    if (wsEnabled) {
+      setCodeSource('ws')
+      return
+    }
+
+    let cancelled = false
+    setCodeSource('loading')
+
+    getCachedOrGenerateCodeBackend(nodes as any, edges as any, features as any, trainingConfig as any, {
+      dataGraphNodes: dataNodes as any,
+      dataGraphEdges: dataEdges as any,
+      bindings,
+    })
+      .then(({ code, source }) => {
+        if (cancelled) return
+        setBackendCode(code)
+        setCodeSource(source)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        console.error('Backend code generation failed:', err)
+        setCodeSource('offline')
+      })
+
+    return () => { cancelled = true }
+  }, [nodes, edges, features, trainingConfig, dataNodes, dataEdges, bindings, wsEnabled])
+
+  const displayCode = wsEnabled && wsCode ? wsCode : (backendCode || localCode)
 
   const handleRun = async () => {
     setExecuting(true)
@@ -195,6 +228,15 @@ export default function CodePreview({ width = 320, onWidthChange }: CodePreviewP
           )}
           {wsEnabled && !connected && (
             <span style={{ fontSize: 9, color: '#ffaa44', fontWeight: 700 }}>● 连接中</span>
+          )}
+          {!wsEnabled && codeSource === 'backend' && (
+            <span style={{ fontSize: 9, color: '#66aaff', fontWeight: 600 }} title="代码由后端 /api/generate 生成">后端生成</span>
+          )}
+          {!wsEnabled && codeSource === 'offline' && (
+            <span style={{ fontSize: 9, color: '#ffaa44', fontWeight: 600 }} title="后端不可达，使用本地生成器">离线预览</span>
+          )}
+          {!wsEnabled && codeSource === 'loading' && (
+            <span style={{ fontSize: 9, color: '#888', fontWeight: 600 }}>生成中...</span>
           )}
           {backendAvailable.current && (
             <button

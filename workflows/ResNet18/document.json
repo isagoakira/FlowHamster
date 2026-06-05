@@ -1,0 +1,2282 @@
+{
+  "version": "2.0.0",
+  "metadata": {
+    "name": "ResNet-18",
+    "description": "ResNet-18 for CIFAR-10 image classification with skip connections",
+    "schemaVersion": "2.0.0",
+    "createdAt": "2026-06-03T14:58:55.992446+00:00",
+    "updatedAt": "2026-06-03T14:58:55.992448+00:00",
+    "exportSource": "flowhamster"
+  },
+  "modelGraph": {
+    "kind": "model",
+    "nodes": [
+      {
+        "id": "input",
+        "data": {
+          "nodeType": "input",
+          "label": "Input",
+          "params": {
+            "shape": "3,32,32",
+            "dtype": "float32"
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "type": "inputNode",
+        "style": {},
+        "width": 170,
+        "height": 129
+      },
+      {
+        "id": "conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 64",
+          "params": {
+            "in_channels": 3,
+            "out_channels": 64,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 280,
+          "y": 80
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 64
+          }
+        },
+        "position": {
+          "x": 460,
+          "y": 80
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "relu0",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 640,
+          "y": 80
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block1_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 64",
+          "params": {
+            "in_channels": 64,
+            "out_channels": 64,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 520
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block1_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 64,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 520
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block1_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 520
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block1_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 64",
+          "params": {
+            "in_channels": 64,
+            "out_channels": 64,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 520
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block1_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 64,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 520
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block1_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 520
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer1_block1_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 520
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block2_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 64",
+          "params": {
+            "in_channels": 64,
+            "out_channels": 64,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 1290
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block2_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 64,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 1290
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block2_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 1290
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block2_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 64",
+          "params": {
+            "in_channels": 64,
+            "out_channels": 64,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 1290
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block2_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 64,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 1290
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer1_block2_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 1290
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer1_block2_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 1290
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 128",
+          "params": {
+            "in_channels": 64,
+            "out_channels": 128,
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 2060
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 128,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 2060
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 2060
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 128",
+          "params": {
+            "in_channels": 128,
+            "out_channels": 128,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 2060
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 128,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 2060
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 2060
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer2_block1_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 2060
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_downconv",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Downsample",
+          "params": {
+            "in_channels": 64,
+            "out_channels": 128,
+            "kernel_size": 1,
+            "stride": 2,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 2150
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 160,
+        "height": 58
+      },
+      {
+        "id": "layer2_block1_downbn",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 128
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 2150
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block2_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 128",
+          "params": {
+            "in_channels": 128,
+            "out_channels": 128,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 3050
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block2_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 128,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 3050
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block2_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 3050
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block2_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 128",
+          "params": {
+            "in_channels": 128,
+            "out_channels": 128,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 3050
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block2_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 128,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 3050
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer2_block2_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 3050
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer2_block2_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 3050
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 256",
+          "params": {
+            "in_channels": 128,
+            "out_channels": 256,
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 3820
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 256,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 3820
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 3820
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 256",
+          "params": {
+            "in_channels": 256,
+            "out_channels": 256,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 3820
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 256,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 3820
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 3820
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer3_block1_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 3820
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_downconv",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Downsample",
+          "params": {
+            "in_channels": 128,
+            "out_channels": 256,
+            "kernel_size": 1,
+            "stride": 2,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 3910
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 160,
+        "height": 58
+      },
+      {
+        "id": "layer3_block1_downbn",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 256
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 3910
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block2_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 256",
+          "params": {
+            "in_channels": 256,
+            "out_channels": 256,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 4810
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block2_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 256,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 4810
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block2_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 4810
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block2_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 256",
+          "params": {
+            "in_channels": 256,
+            "out_channels": 256,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 4810
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block2_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 256,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 4810
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer3_block2_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 4810
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer3_block2_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 4810
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 512",
+          "params": {
+            "in_channels": 256,
+            "out_channels": 512,
+            "kernel_size": 3,
+            "stride": 2,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 5580
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 512,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 5580
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 5580
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 512",
+          "params": {
+            "in_channels": 512,
+            "out_channels": 512,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 5580
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 512,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 5580
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 5580
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer4_block1_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 5580
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_downconv",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Downsample",
+          "params": {
+            "in_channels": 256,
+            "out_channels": 512,
+            "kernel_size": 1,
+            "stride": 2,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 5670
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 160,
+        "height": 58
+      },
+      {
+        "id": "layer4_block1_downbn",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 512
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 5670
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block2_conv1",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 512",
+          "params": {
+            "in_channels": 512,
+            "out_channels": 512,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 200,
+          "y": 6570
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block2_bn1",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 512,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 380,
+          "y": 6570
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block2_relu1",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 560,
+          "y": 6570
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block2_conv2",
+        "data": {
+          "nodeType": "conv2d",
+          "label": "Conv 512",
+          "params": {
+            "in_channels": 512,
+            "out_channels": 512,
+            "kernel_size": 3,
+            "stride": 1,
+            "padding": 1,
+            "bias": false
+          }
+        },
+        "position": {
+          "x": 740,
+          "y": 6570
+        },
+        "type": "conv2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block2_bn2",
+        "data": {
+          "nodeType": "batchnorm2d",
+          "label": "BN",
+          "params": {
+            "num_features": 512,
+            "eps": 1e-05,
+            "momentum": 0.1
+          }
+        },
+        "position": {
+          "x": 920,
+          "y": 6570
+        },
+        "type": "batchnorm2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "layer4_block2_add",
+        "data": {
+          "nodeType": "add",
+          "label": "Add",
+          "params": {}
+        },
+        "position": {
+          "x": 1100,
+          "y": 6570
+        },
+        "type": "addNode",
+        "style": {},
+        "width": 140,
+        "height": 80
+      },
+      {
+        "id": "layer4_block2_relu2",
+        "data": {
+          "nodeType": "relu",
+          "label": "ReLU",
+          "params": {}
+        },
+        "position": {
+          "x": 1280,
+          "y": 6570
+        },
+        "type": "reluNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "gap",
+        "data": {
+          "nodeType": "adaptiveavgpool2d",
+          "label": "AdaptiveAvgPool",
+          "params": {
+            "output_size": 1
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 6720
+        },
+        "type": "adaptiveavgpool2dNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "flat",
+        "data": {
+          "nodeType": "flatten",
+          "label": "Flatten",
+          "params": {
+            "start_dim": 1
+          }
+        },
+        "position": {
+          "x": 300,
+          "y": 6720
+        },
+        "type": "flattenNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "fc",
+        "data": {
+          "nodeType": "linear",
+          "label": "Linear 10",
+          "params": {
+            "in_features": 512,
+            "out_features": 10,
+            "bias": true
+          }
+        },
+        "position": {
+          "x": 500,
+          "y": 6720
+        },
+        "type": "linearNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "output",
+        "data": {
+          "nodeType": "output",
+          "label": "Output",
+          "params": {}
+        },
+        "position": {
+          "x": 700,
+          "y": 6720
+        },
+        "type": "outputNode",
+        "style": {},
+        "width": 170,
+        "height": 93
+      }
+    ],
+    "edges": [
+      {
+        "id": "input:result->conv1:a",
+        "source": "input",
+        "target": "conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "conv1:result->bn1:a",
+        "source": "conv1",
+        "target": "bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "bn1:result->relu0:a",
+        "source": "bn1",
+        "target": "relu0",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_conv1:result->layer1_block1_bn1:a",
+        "source": "layer1_block1_conv1",
+        "target": "layer1_block1_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_bn1:result->layer1_block1_relu1:a",
+        "source": "layer1_block1_bn1",
+        "target": "layer1_block1_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_relu1:result->layer1_block1_conv2:a",
+        "source": "layer1_block1_relu1",
+        "target": "layer1_block1_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_conv2:result->layer1_block1_bn2:a",
+        "source": "layer1_block1_conv2",
+        "target": "layer1_block1_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_bn2:result->layer1_block1_add:a",
+        "source": "layer1_block1_bn2",
+        "target": "layer1_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_add:result->layer1_block1_relu2:a",
+        "source": "layer1_block1_add",
+        "target": "layer1_block1_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "relu0:result->layer1_block1_conv1:a",
+        "source": "relu0",
+        "target": "layer1_block1_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "relu0:result->layer1_block1_add:b",
+        "source": "relu0",
+        "target": "layer1_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer1_block1_bn2:result->layer1_block1_add:a",
+        "source": "layer1_block1_bn2",
+        "target": "layer1_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_conv1:result->layer1_block2_bn1:a",
+        "source": "layer1_block2_conv1",
+        "target": "layer1_block2_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_bn1:result->layer1_block2_relu1:a",
+        "source": "layer1_block2_bn1",
+        "target": "layer1_block2_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_relu1:result->layer1_block2_conv2:a",
+        "source": "layer1_block2_relu1",
+        "target": "layer1_block2_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_conv2:result->layer1_block2_bn2:a",
+        "source": "layer1_block2_conv2",
+        "target": "layer1_block2_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_bn2:result->layer1_block2_add:a",
+        "source": "layer1_block2_bn2",
+        "target": "layer1_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_add:result->layer1_block2_relu2:a",
+        "source": "layer1_block2_add",
+        "target": "layer1_block2_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_relu2:result->layer1_block2_conv1:a",
+        "source": "layer1_block1_relu2",
+        "target": "layer1_block2_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block1_relu2:result->layer1_block2_add:b",
+        "source": "layer1_block1_relu2",
+        "target": "layer1_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer1_block2_bn2:result->layer1_block2_add:a",
+        "source": "layer1_block2_bn2",
+        "target": "layer1_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_conv1:result->layer2_block1_bn1:a",
+        "source": "layer2_block1_conv1",
+        "target": "layer2_block1_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_bn1:result->layer2_block1_relu1:a",
+        "source": "layer2_block1_bn1",
+        "target": "layer2_block1_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_relu1:result->layer2_block1_conv2:a",
+        "source": "layer2_block1_relu1",
+        "target": "layer2_block1_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_conv2:result->layer2_block1_bn2:a",
+        "source": "layer2_block1_conv2",
+        "target": "layer2_block1_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_bn2:result->layer2_block1_add:a",
+        "source": "layer2_block1_bn2",
+        "target": "layer2_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_add:result->layer2_block1_relu2:a",
+        "source": "layer2_block1_add",
+        "target": "layer2_block1_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_relu2:result->layer2_block1_conv1:a",
+        "source": "layer1_block2_relu2",
+        "target": "layer2_block1_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer1_block2_relu2:result->layer2_block1_downconv:a",
+        "source": "layer1_block2_relu2",
+        "target": "layer2_block1_downconv",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_downconv:result->layer2_block1_downbn:a",
+        "source": "layer2_block1_downconv",
+        "target": "layer2_block1_downbn",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_downbn:result->layer2_block1_add:b",
+        "source": "layer2_block1_downbn",
+        "target": "layer2_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer2_block1_bn2:result->layer2_block1_add:a",
+        "source": "layer2_block1_bn2",
+        "target": "layer2_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_conv1:result->layer2_block2_bn1:a",
+        "source": "layer2_block2_conv1",
+        "target": "layer2_block2_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_bn1:result->layer2_block2_relu1:a",
+        "source": "layer2_block2_bn1",
+        "target": "layer2_block2_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_relu1:result->layer2_block2_conv2:a",
+        "source": "layer2_block2_relu1",
+        "target": "layer2_block2_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_conv2:result->layer2_block2_bn2:a",
+        "source": "layer2_block2_conv2",
+        "target": "layer2_block2_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_bn2:result->layer2_block2_add:a",
+        "source": "layer2_block2_bn2",
+        "target": "layer2_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_add:result->layer2_block2_relu2:a",
+        "source": "layer2_block2_add",
+        "target": "layer2_block2_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_relu2:result->layer2_block2_conv1:a",
+        "source": "layer2_block1_relu2",
+        "target": "layer2_block2_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block1_relu2:result->layer2_block2_add:b",
+        "source": "layer2_block1_relu2",
+        "target": "layer2_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer2_block2_bn2:result->layer2_block2_add:a",
+        "source": "layer2_block2_bn2",
+        "target": "layer2_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_conv1:result->layer3_block1_bn1:a",
+        "source": "layer3_block1_conv1",
+        "target": "layer3_block1_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_bn1:result->layer3_block1_relu1:a",
+        "source": "layer3_block1_bn1",
+        "target": "layer3_block1_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_relu1:result->layer3_block1_conv2:a",
+        "source": "layer3_block1_relu1",
+        "target": "layer3_block1_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_conv2:result->layer3_block1_bn2:a",
+        "source": "layer3_block1_conv2",
+        "target": "layer3_block1_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_bn2:result->layer3_block1_add:a",
+        "source": "layer3_block1_bn2",
+        "target": "layer3_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_add:result->layer3_block1_relu2:a",
+        "source": "layer3_block1_add",
+        "target": "layer3_block1_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_relu2:result->layer3_block1_conv1:a",
+        "source": "layer2_block2_relu2",
+        "target": "layer3_block1_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer2_block2_relu2:result->layer3_block1_downconv:a",
+        "source": "layer2_block2_relu2",
+        "target": "layer3_block1_downconv",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_downconv:result->layer3_block1_downbn:a",
+        "source": "layer3_block1_downconv",
+        "target": "layer3_block1_downbn",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_downbn:result->layer3_block1_add:b",
+        "source": "layer3_block1_downbn",
+        "target": "layer3_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer3_block1_bn2:result->layer3_block1_add:a",
+        "source": "layer3_block1_bn2",
+        "target": "layer3_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_conv1:result->layer3_block2_bn1:a",
+        "source": "layer3_block2_conv1",
+        "target": "layer3_block2_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_bn1:result->layer3_block2_relu1:a",
+        "source": "layer3_block2_bn1",
+        "target": "layer3_block2_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_relu1:result->layer3_block2_conv2:a",
+        "source": "layer3_block2_relu1",
+        "target": "layer3_block2_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_conv2:result->layer3_block2_bn2:a",
+        "source": "layer3_block2_conv2",
+        "target": "layer3_block2_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_bn2:result->layer3_block2_add:a",
+        "source": "layer3_block2_bn2",
+        "target": "layer3_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_add:result->layer3_block2_relu2:a",
+        "source": "layer3_block2_add",
+        "target": "layer3_block2_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_relu2:result->layer3_block2_conv1:a",
+        "source": "layer3_block1_relu2",
+        "target": "layer3_block2_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block1_relu2:result->layer3_block2_add:b",
+        "source": "layer3_block1_relu2",
+        "target": "layer3_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer3_block2_bn2:result->layer3_block2_add:a",
+        "source": "layer3_block2_bn2",
+        "target": "layer3_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_conv1:result->layer4_block1_bn1:a",
+        "source": "layer4_block1_conv1",
+        "target": "layer4_block1_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_bn1:result->layer4_block1_relu1:a",
+        "source": "layer4_block1_bn1",
+        "target": "layer4_block1_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_relu1:result->layer4_block1_conv2:a",
+        "source": "layer4_block1_relu1",
+        "target": "layer4_block1_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_conv2:result->layer4_block1_bn2:a",
+        "source": "layer4_block1_conv2",
+        "target": "layer4_block1_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_bn2:result->layer4_block1_add:a",
+        "source": "layer4_block1_bn2",
+        "target": "layer4_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_add:result->layer4_block1_relu2:a",
+        "source": "layer4_block1_add",
+        "target": "layer4_block1_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_relu2:result->layer4_block1_conv1:a",
+        "source": "layer3_block2_relu2",
+        "target": "layer4_block1_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer3_block2_relu2:result->layer4_block1_downconv:a",
+        "source": "layer3_block2_relu2",
+        "target": "layer4_block1_downconv",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_downconv:result->layer4_block1_downbn:a",
+        "source": "layer4_block1_downconv",
+        "target": "layer4_block1_downbn",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_downbn:result->layer4_block1_add:b",
+        "source": "layer4_block1_downbn",
+        "target": "layer4_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer4_block1_bn2:result->layer4_block1_add:a",
+        "source": "layer4_block1_bn2",
+        "target": "layer4_block1_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_conv1:result->layer4_block2_bn1:a",
+        "source": "layer4_block2_conv1",
+        "target": "layer4_block2_bn1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_bn1:result->layer4_block2_relu1:a",
+        "source": "layer4_block2_bn1",
+        "target": "layer4_block2_relu1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_relu1:result->layer4_block2_conv2:a",
+        "source": "layer4_block2_relu1",
+        "target": "layer4_block2_conv2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_conv2:result->layer4_block2_bn2:a",
+        "source": "layer4_block2_conv2",
+        "target": "layer4_block2_bn2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_bn2:result->layer4_block2_add:a",
+        "source": "layer4_block2_bn2",
+        "target": "layer4_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_add:result->layer4_block2_relu2:a",
+        "source": "layer4_block2_add",
+        "target": "layer4_block2_relu2",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_relu2:result->layer4_block2_conv1:a",
+        "source": "layer4_block1_relu2",
+        "target": "layer4_block2_conv1",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block1_relu2:result->layer4_block2_add:b",
+        "source": "layer4_block1_relu2",
+        "target": "layer4_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "b"
+      },
+      {
+        "id": "layer4_block2_bn2:result->layer4_block2_add:a",
+        "source": "layer4_block2_bn2",
+        "target": "layer4_block2_add",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "layer4_block2_relu2:result->gap:a",
+        "source": "layer4_block2_relu2",
+        "target": "gap",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "gap:result->flat:a",
+        "source": "gap",
+        "target": "flat",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "flat:result->fc:a",
+        "source": "flat",
+        "target": "fc",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "fc:result->output:a",
+        "source": "fc",
+        "target": "output",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      }
+    ],
+    "contract": {
+      "inputs": [
+        {
+          "name": "input_1",
+          "dtype": "float32",
+          "shapeHint": "3,32,32",
+          "semanticRole": "model_input",
+          "description": "Input"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "output_1",
+          "semanticRole": "model_output",
+          "description": "Output"
+        }
+      ]
+    }
+  },
+  "dataGraph": {
+    "kind": "data",
+    "nodes": [
+      {
+        "id": "ds_src",
+        "data": {
+          "nodeType": "csv_source",
+          "label": "CIFAR-10 CSV",
+          "params": {
+            "path": "./data/cifar10_train.csv",
+            "delimiter": ",",
+            "feature_columns": "r,g,b",
+            "label_column": "label"
+          }
+        },
+        "position": {
+          "x": 100,
+          "y": 80
+        },
+        "type": "csv_sourceNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_resize",
+        "data": {
+          "nodeType": "resize",
+          "label": "Resize",
+          "params": {
+            "size": "32,32"
+          }
+        },
+        "position": {
+          "x": 340,
+          "y": 80
+        },
+        "type": "resizeNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_normalize",
+        "data": {
+          "nodeType": "normalize",
+          "label": "Normalize",
+          "params": {
+            "mean": "0.4914,0.4822,0.4465",
+            "std": "0.2470,0.2435,0.2616"
+          }
+        },
+        "position": {
+          "x": 580,
+          "y": 80
+        },
+        "type": "normalizeNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_to_tensor",
+        "data": {
+          "nodeType": "to_tensor",
+          "label": "To Tensor",
+          "params": {}
+        },
+        "position": {
+          "x": 820,
+          "y": 80
+        },
+        "type": "to_tensorNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_flip",
+        "data": {
+          "nodeType": "random_horizontal_flip",
+          "label": "Random H-Flip",
+          "params": {
+            "p": 0.5
+          }
+        },
+        "position": {
+          "x": 1060,
+          "y": 80
+        },
+        "type": "random_horizontal_flipNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_crop",
+        "data": {
+          "nodeType": "random_crop",
+          "label": "Random Crop",
+          "params": {
+            "size": 32,
+            "padding": 4
+          }
+        },
+        "position": {
+          "x": 1300,
+          "y": 80
+        },
+        "type": "random_cropNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_split",
+        "data": {
+          "nodeType": "train_val_split",
+          "label": "Train/Val Split",
+          "params": {
+            "train_ratio": 0.9,
+            "val_ratio": 0.1,
+            "seed": 42
+          }
+        },
+        "position": {
+          "x": 1540,
+          "y": 80
+        },
+        "type": "train_val_splitNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_batch",
+        "data": {
+          "nodeType": "batch",
+          "label": "Batch",
+          "params": {
+            "batch_size": 128,
+            "drop_last": false
+          }
+        },
+        "position": {
+          "x": 1780,
+          "y": 80
+        },
+        "type": "batchNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      },
+      {
+        "id": "ds_out",
+        "data": {
+          "nodeType": "dataset_output",
+          "label": "Dataset Output",
+          "params": {
+            "fields": "image,label"
+          }
+        },
+        "position": {
+          "x": 2020,
+          "y": 80
+        },
+        "type": "dataset_outputNode",
+        "style": {},
+        "width": 140,
+        "height": 58
+      }
+    ],
+    "edges": [
+      {
+        "id": "ds_src:result->ds_resize:a",
+        "source": "ds_src",
+        "target": "ds_resize",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_resize:result->ds_normalize:a",
+        "source": "ds_resize",
+        "target": "ds_normalize",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_normalize:result->ds_to_tensor:a",
+        "source": "ds_normalize",
+        "target": "ds_to_tensor",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_to_tensor:result->ds_flip:a",
+        "source": "ds_to_tensor",
+        "target": "ds_flip",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_flip:result->ds_crop:a",
+        "source": "ds_flip",
+        "target": "ds_crop",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_crop:result->ds_split:a",
+        "source": "ds_crop",
+        "target": "ds_split",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_split:result->ds_batch:a",
+        "source": "ds_split",
+        "target": "ds_batch",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      },
+      {
+        "id": "ds_batch:result->ds_out:a",
+        "source": "ds_batch",
+        "target": "ds_out",
+        "sourceHandle": "result",
+        "targetHandle": "a"
+      }
+    ],
+    "contract": {
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image",
+          "semanticRole": "data_output",
+          "description": "Dataset Output"
+        },
+        {
+          "name": "label",
+          "semanticRole": "data_output",
+          "description": "Dataset Output"
+        }
+      ]
+    }
+  },
+  "trainingConfig": {
+    "taskType": "classification",
+    "loss": {
+      "type": "cross_entropy",
+      "enabled": true,
+      "params": {}
+    },
+    "optimizer": {
+      "type": "sgd",
+      "enabled": true,
+      "params": {
+        "lr": 0.1,
+        "momentum": 0.9,
+        "weight_decay": 0.0005
+      }
+    },
+    "scheduler": {
+      "type": "cosine_annealing",
+      "enabled": true,
+      "params": {
+        "T_max": 200,
+        "eta_min": 0
+      }
+    },
+    "metrics": [
+      {
+        "type": "accuracy",
+        "enabled": true,
+        "params": {}
+      }
+    ],
+    "runtime": {
+      "device": "auto",
+      "epochs": 200,
+      "batchSize": 128,
+      "amp": false,
+      "gradClip": null,
+      "numWorkers": 4
+    },
+    "checkpoint": {
+      "enabled": true,
+      "saveTopK": 1,
+      "monitor": "val_loss",
+      "mode": "min",
+      "earlyStopPatience": null
+    }
+  },
+  "bindings": [
+    {
+      "id": "b1",
+      "sourceGraph": "data",
+      "sourceKey": "image",
+      "target": "model_input",
+      "targetKey": "input_1",
+      "description": "image -> model input"
+    },
+    {
+      "id": "b2",
+      "sourceGraph": "data",
+      "sourceKey": "label",
+      "target": "training_target",
+      "targetKey": "target",
+      "description": "label -> training target"
+    }
+  ]
+}

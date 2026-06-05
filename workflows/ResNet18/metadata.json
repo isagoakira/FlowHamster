@@ -1,0 +1,7 @@
+{
+  "id": "ResNet18",
+  "name": "ResNet-18",
+  "description": "ResNet-18 for CIFAR-10 image classification with skip connections",
+  "created_at": 1780498735.99603,
+  "updated_at": 1780498735.996032
+}

@@ -23,6 +23,12 @@ interface BindingState {
   getBindingsByTarget: (target: WorkflowBindingTarget) => WorkflowBinding[]
   getBindingForTarget: (target: WorkflowBindingTarget, targetKey: string) => WorkflowBinding | undefined
   hasBinding: (target: WorkflowBindingTarget, targetKey: string) => boolean
+
+  // Loss binding helpers
+  getLossBindings: () => WorkflowBinding[]
+  getLossBindingForNode: (lossNodeId: string) => WorkflowBinding | undefined
+  addLossBinding: (lossNodeId: string, sourceKey: string) => string
+  removeLossBinding: (lossNodeId: string) => void
 }
 
 function generateBindingId(sourceGraph: WorkflowGraphKind, sourceKey: string, target: WorkflowBindingTarget, targetKey: string): string {
@@ -93,6 +99,41 @@ export const useBindingStore = create<BindingState>((set, get) => ({
     return get().bindings.some(
       (b) => b.target === target && b.targetKey === targetKey
     )
+  },
+
+  getLossBindings: () => {
+    return get().bindings.filter((b) => b.target === 'loss_target')
+  },
+
+  getLossBindingForNode: (lossNodeId) => {
+    return get().bindings.find(
+      (b) => b.target === 'loss_target' && b.targetKey === lossNodeId
+    )
+  },
+
+  addLossBinding: (lossNodeId, sourceKey) => {
+    const existing = get().bindings.find(
+      (b) => b.target === 'loss_target' && b.targetKey === lossNodeId
+    )
+    if (existing) {
+      get().updateBinding(existing.id, { sourceKey })
+      return existing.id
+    }
+    return get().addBinding({
+      sourceGraph: 'data',
+      sourceKey,
+      target: 'loss_target',
+      targetKey: lossNodeId,
+    })
+  },
+
+  removeLossBinding: (lossNodeId) => {
+    const binding = get().bindings.find(
+      (b) => b.target === 'loss_target' && b.targetKey === lossNodeId
+    )
+    if (binding) {
+      get().removeBinding(binding.id)
+    }
   },
 }))
 

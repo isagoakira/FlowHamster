@@ -22,7 +22,7 @@ export interface WorkflowPayloadOptions {
   bindings?: WorkflowBinding[]
 }
 
-function buildExecutableGraphPayload(nodes: FlowHamsterNode[], edges: FlowHamsterEdge[]) {
+export function buildExecutableGraphPayload(nodes: FlowHamsterNode[], edges: FlowHamsterEdge[]) {
   const executableGraph = getExecutableGraph(nodes, edges)
   return {
     nodes: executableGraph.nodes.map((n) => ({ id: n.id, type: n.type, data: n.data })),

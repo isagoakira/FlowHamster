@@ -1,0 +1,7 @@
+{
+  "id": "TransformerEncoder",
+  "name": "Transformer Encoder",
+  "description": "Transformer Encoder for text classification (IMDB sentiment)",
+  "created_at": 1780498735.997093,
+  "updated_at": 1780498735.997094
+}
