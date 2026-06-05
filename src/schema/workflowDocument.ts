@@ -3,7 +3,7 @@ import { FlowHamsterEdge, FlowHamsterNode } from '../types/graph'
 export const WORKFLOW_DOCUMENT_VERSION = '2.0.0'
 
 export type WorkflowGraphKind = 'model' | 'data'
-export type WorkflowBindingTarget = 'model_input' | 'model_output' | 'training_input' | 'training_target'
+export type WorkflowBindingTarget = 'model_input' | 'model_output' | 'training_input' | 'training_target' | 'loss_target'
 
 export interface WorkflowPortContract {
   name: string

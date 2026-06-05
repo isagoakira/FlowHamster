@@ -10,7 +10,7 @@ import { SubModule, getCompositeNodeDef } from './nodeRegistry'
 import { getAllCustomClasses } from './customCompositeRegistry'
 import { getSourceNodeId } from './astBuilder'
 import { safeEvaluate, resolveStringTemplate } from './safeEval'
-import { genPythonNodeInit, safePythonName } from './pythonNodeRegistry'
+import { genPythonNodeInit } from './pythonNodeRegistry'
 
 // Feature toggles interface
 export interface FeatureToggles {
@@ -685,7 +685,7 @@ export function genInit(block: NodeBlock): string | null {
           c.name === customClassId ||
           `custom_${c.name}` === customClassId
         )
-        const className = safePythonName(customClass?.name ?? block.nodeId ?? 'CustomModule')
+        const className = customClass?.name ?? block.nodeId ?? 'CustomModule'
         const params = Object.entries(f)
           .filter(([k]) => !['nodeType', 'label', 'customClassId', 'internalStructure', 'internalEdges'].includes(k))
           .map(([k, v]) => `${k}=${pyLiteral(v)}`)
@@ -857,16 +857,17 @@ export function genLossInit(block: NodeBlock): string | null {
   }
 }
 
-export function genLossForward(block: NodeBlock, upstreamOutputVar: string): string | null {
+export function genLossForward(block: NodeBlock, upstreamOutputVar: string, targetExpr?: string): string | null {
+  const target = targetExpr ?? 'target'
   switch (block.opType) {
     case 'crossentropyloss':
-      return `    loss = loss_fn(${upstreamOutputVar}, torch.randint(0, ${block.fields.num_classes ?? 10}, (1,)))`
+      return `    loss = loss_fn(${upstreamOutputVar}, ${target})`
     case 'mseloss':
-      return `    loss = mse_loss_fn(${upstreamOutputVar}, torch.randn_like(${upstreamOutputVar}))`
+      return `    loss = mse_loss_fn(${upstreamOutputVar}, ${target})`
     case 'focalloss':
-      return `    loss = focal_loss_fn(${upstreamOutputVar}, torch.randint(0, ${block.fields.num_classes ?? 10}, (1,)))`
+      return `    loss = focal_loss_fn(${upstreamOutputVar}, ${target})`
     case 'labelsmoothing':
-      return `    loss = label_smoothing_loss_fn(${upstreamOutputVar}, torch.randint(0, ${block.fields.num_classes ?? 10}, (1,)))`
+      return `    loss = label_smoothing_loss_fn(${upstreamOutputVar}, ${target})`
     default: return null
   }
 }

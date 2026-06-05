@@ -6,6 +6,7 @@ export interface CompiledDataWorkflow {
   outputFields: string[]
   modelInputBindings: Array<{ targetKey: string; sourceKey: string }>
   targetBindingSource: string | null
+  lossTargetBindings: Array<{ lossNodeId: string; sourceKey: string }>
   primaryModelInputKey: string | null
   warnings: string[]
   summaryLines: string[]
@@ -148,7 +149,13 @@ export function validateBindingCompatibility(
     if (binding.sourceGraph !== 'data') continue
 
     const sourceSpec = fieldSpecs.get(binding.sourceKey)
-    const targetDtype = modelInputMap.get(binding.targetKey) || 'tensor'
+    // Determine expected target dtype based on binding target type
+    let targetDtype: FieldDtype
+    if (binding.target === 'loss_target' || binding.target === 'training_target') {
+      targetDtype = 'label'
+    } else {
+      targetDtype = modelInputMap.get(binding.targetKey) || 'tensor'
+    }
 
     const validation: BindingValidation = {
       sourceKey: binding.sourceKey,
@@ -163,6 +170,12 @@ export function validateBindingCompatibility(
       if (incompatibility) {
         validation.isCompatible = false
         validation.error = incompatibility
+      }
+      // Additional check: loss targets should preferably be label/scalar/tensor
+      if ((binding.target === 'loss_target' || binding.target === 'training_target') &&
+          !['label', 'scalar', 'tensor', 'mask'].includes(sourceSpec.dtype)) {
+        validation.isCompatible = false
+        validation.error = `Loss target requires label/scalar/mask dtype, got '${sourceSpec.dtype}'`
       }
     } else {
       validation.isCompatible = false
@@ -1383,297 +1396,6 @@ function generateDataNodeCode(node: DataFlowNode, _nodeIndex: number): DataNodeC
       break
     }
 
-    case 'random_erasing': {
-      const p = Number(params.p || 0.5)
-      const scale = String(params.scale || '0.02,0.33')
-      const ratio = String(params.ratio || '0.3,3.3')
-      const [scaleMin, scaleMax] = scale.split(',').map(Number)
-      const [ratioMin, ratioMax] = ratio.split(',').map(Number)
-      result.getitemCode.push(
-        `        # Random Erasing (p=${p}, scale=[${scaleMin},${scaleMax}], ratio=[${ratioMin},${ratioMax}])`,
-        `        if '_field_image' in locals() and torch.rand(1) < ${p}:`
-      )
-      result.getitemCode.push(
-        `            _area = _field_image.shape[1] * _field_image.shape[2]`,
-        `            _erase_area = torch.empty(1).uniform_(${scaleMin}, ${scaleMax}).item() * _area`,
-        `            _aspect_ratio = torch.empty(1).uniform_(${ratioMin}, ${ratioMax}).item()`,
-        `            _eh = int(round((_erase_area * _aspect_ratio) ** 0.5))`,
-        `            _ew = int(round((_erase_area / _aspect_ratio) ** 0.5))`,
-        `            if _eh < _field_image.shape[1] and _ew < _field_image.shape[2]:`,
-        `                _ey = torch.randint(0, _field_image.shape[1] - _eh, (1,)).item()`,
-        `                _ex = torch.randint(0, _field_image.shape[2] - _ew, (1,)).item()`,
-        `                _field_image[:, _ey:_ey+_eh, _ex:_ex+_ew] = torch.randn(_field_image.shape[0], _eh, _ew) * 0.5`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    case 'gaussian_blur': {
-      const kernelSize = Number(params.kernel_size || 5)
-      const sigma = String(params.sigma || '1.0,2.0')
-      const [sigmaMin, sigmaMax] = sigma.split(',').map(Number)
-      result.getitemCode.push(
-        `        # Gaussian Blur (kernel_size=${kernelSize}, sigma=[${sigmaMin},${sigmaMax}])`,
-        `        if '_field_image' in locals():`,
-        `            _sigma = torch.empty(1).uniform_(${sigmaMin}, ${sigmaMax}).item()`,
-        `            _ks = ${kernelSize} if ${kernelSize} % 2 == 1 else ${kernelSize} + 1`,
-        `            _field_image = torchvision.transforms.functional.gaussian_blur(_field_image, _ks, [_sigma])`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    // === Advanced Augmentation ===
-    case 'mixup': {
-      const alpha = Number(params.alpha || 0.2)
-      result.getitemCode.push(
-        `        # MixUp (alpha=${alpha})`,
-        `        if '_field_image' in locals():`,
-        `            _lam = torch.distributions.Beta(${alpha}, ${alpha}).sample().item()`,
-        `            _idx2 = torch.randint(0, len(self), (1,)).item()`,
-        `            _sample2 = self[_idx2]`,
-        `            if 'image' in _sample2:`,
-        `                _field_image = _lam * _field_image + (1 - _lam) * _sample2['image']`,
-        `            if 'label' in _sample2 and '_field_label' in locals():`,
-        `                _field_label = _lam * _field_label + (1 - _lam) * _sample2['label']`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      result.fieldTracking['label'] = '_field_label'
-      break
-    }
-
-    case 'cutmix': {
-      const alpha = Number(params.alpha || 1.0)
-      result.getitemCode.push(
-        `        # CutMix (alpha=${alpha})`,
-        `        if '_field_image' in locals():`,
-        `            _lam = torch.distributions.Beta(${alpha}, ${alpha}).sample().item()`,
-        `            _idx2 = torch.randint(0, len(self), (1,)).item()`,
-        `            _sample2 = self[_idx2]`,
-        `            if 'image' in _sample2:`,
-        `                _h, _w = _field_image.shape[1:]`,
-        `                _cut_ratio = (1 - _lam) ** 0.5`,
-        `                _cut_h = int(_h * _cut_ratio)`,
-        `                _cut_w = int(_w * _cut_ratio)`,
-        `                _cy = torch.randint(0, _h, (1,)).item()`,
-        `                _cx = torch.randint(0, _w, (1,)).item()`,
-        `                _y1 = max(0, _cy - _cut_h // 2)`,
-        `                _y2 = min(_h, _cy + _cut_h // 2)`,
-        `                _x1 = max(0, _cx - _cut_w // 2)`,
-        `                _x2 = min(_w, _cx + _cut_w // 2)`,
-        `                _field_image[:, _y1:_y2, _x1:_x2] = _sample2['image'][:, _y1:_y2, _x1:_x2]`,
-        `                _lam = 1 - ((_y2 - _y1) * (_x2 - _x1) / (_h * _w))`,
-        `            if 'label' in _sample2 and '_field_label' in locals():`,
-        `                _field_label = _lam * _field_label + (1 - _lam) * _sample2['label']`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      result.fieldTracking['label'] = '_field_label'
-      break
-    }
-
-    case 'autoaugment': {
-      const policy = pythonValue(params.policy || 'imagenet')
-      result.getitemCode.push(
-        `        # AutoAugment (policy=${policy})`,
-        `        if '_field_image' in locals():`,
-        `            from torchvision.transforms import autoaugment`,
-        `            _aa_policy = autoaugment.AutoAugmentPolicy.${String(params.policy || 'imagenet').toUpperCase()}`,
-        `            _aa_transform = autoaugment.AutoAugment(policy=_aa_policy)`,
-        `            from PIL import Image`,
-        `            _pil_img = Image.fromarray((_field_image.permute(1,2,0).cpu().numpy() * 255).astype('uint8'))`,
-        `            _pil_aug = _aa_transform(_pil_img)`,
-        `            _field_image = torch.from_numpy(np.array(_pil_aug)).permute(2,0,1).float() / 255.0`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    case 'randaugment': {
-      const numOps = Number(params.num_ops || 2)
-      const magnitude = Number(params.magnitude || 9)
-      result.getitemCode.push(
-        `        # RandAugment (num_ops=${numOps}, magnitude=${magnitude})`,
-        `        if '_field_image' in locals():`,
-        `            from torchvision.transforms import RandAugment`,
-        `            _ra_transform = RandAugment(num_ops=${numOps}, magnitude=${magnitude})`,
-        `            from PIL import Image`,
-        `            _pil_img = Image.fromarray((_field_image.permute(1,2,0).cpu().numpy() * 255).astype('uint8'))`,
-        `            _pil_aug = _ra_transform(_pil_img)`,
-        `            _field_image = torch.from_numpy(np.array(_pil_aug)).permute(2,0,1).float() / 255.0`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    case 'cutout': {
-      const holeSize = Number(params.hole_size || 16)
-      result.getitemCode.push(
-        `        # CutOut (hole_size=${holeSize})`,
-        `        if '_field_image' in locals():`,
-        `            _h, _w = _field_image.shape[1:]`,
-        `            _y = torch.randint(0, max(1, _h - ${holeSize}), (1,)).item()`,
-        `            _x = torch.randint(0, max(1, _w - ${holeSize}), (1,)).item()`,
-        `            _field_image[:, _y:_y+${holeSize}, _x:_x+${holeSize}] = 0`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    case 'posterize': {
-      const bits = Number(params.bits || 4)
-      result.getitemCode.push(
-        `        # Posterize (bits=${bits})`,
-        `        if '_field_image' in locals():`,
-        `            import torchvision.transforms.functional as F`,
-        `            _field_image = F.posterize((_field_image * 255).to(torch.uint8), ${bits}).float() / 255.0`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    case 'solarize': {
-      const threshold = Number(params.threshold || 128)
-      result.getitemCode.push(
-        `        # Solarize (threshold=${threshold})`,
-        `        if '_field_image' in locals():`,
-        `            import torchvision.transforms.functional as F`,
-        `            _field_image = F.solarize((_field_image * 255).to(torch.uint8), ${threshold}).float() / 255.0`
-      )
-      result.fieldTracking['image'] = '_field_image'
-      break
-    }
-
-    // === Multi-source Synthesis ===
-    case 'zip_datasets': {
-      result.getitemCode.push(
-        `        # Zip Datasets - fields are merged from upstream sources`
-      )
-      break
-    }
-
-    case 'interleave_datasets': {
-      const cycleLength = Number(params.cycle_length || 2)
-      result.getitemCode.push(
-        `        # Interleave Datasets (cycle_length=${cycleLength})`,
-        `        # Interleaving is applied at dataset construction level`
-      )
-      break
-    }
-
-    case 'sample_from_datasets': {
-      const weights = String(params.weights || '0.5,0.5')
-      result.getitemCode.push(
-        `        # Sample From Datasets (weights=${weights})`,
-        `        # Weighted sampling is applied at dataset construction level`
-      )
-      break
-    }
-
-    // === Feature Engineering ===
-    case 'standard_scaler': {
-      const withMean = params.with_mean !== false
-      const withStd = params.with_std !== false
-      result.initCode.push(
-        `        self._scaler_mean_${safeToken(node.id)} = 0.0`,
-        `        self._scaler_std_${safeToken(node.id)} = 1.0`
-      )
-      result.getitemCode.push(
-        `        # Standard Scaler (with_mean=${withMean}, with_std=${withStd})`,
-        `        if '_field_features' in locals():`,
-        withMean ? `            _field_features = _field_features - self._scaler_mean_${safeToken(node.id)}` : ``,
-        withStd ? `            _field_features = _field_features / (self._scaler_std_${safeToken(node.id)} + 1e-8)` : ``
-      )
-      result.fieldTracking['features'] = '_field_features'
-      break
-    }
-
-    case 'minmax_scaler': {
-      const featureRange = String(params.feature_range || '0,1')
-      const [rangeMin, rangeMax] = featureRange.split(',').map(Number)
-      result.initCode.push(
-        `        self._minmax_min_${safeToken(node.id)} = 0.0`,
-        `        self._minmax_max_${safeToken(node.id)} = 1.0`,
-        `        self._minmax_range_min_${safeToken(node.id)} = ${rangeMin}`,
-        `        self._minmax_range_max_${safeToken(node.id)} = ${rangeMax}`
-      )
-      result.getitemCode.push(
-        `        # MinMax Scaler (feature_range=[${rangeMin}, ${rangeMax}])`,
-        `        if '_field_features' in locals():`,
-        `            _denom = self._minmax_max_${safeToken(node.id)} - self._minmax_min_${safeToken(node.id)} + 1e-8`,
-        `            _field_features = (_field_features - self._minmax_min_${safeToken(node.id)}) / _denom`,
-        `            _field_features = _field_features * (self._minmax_range_max_${safeToken(node.id)} - self._minmax_range_min_${safeToken(node.id)}) + self._minmax_range_min_${safeToken(node.id)}`
-      )
-      result.fieldTracking['features'] = '_field_features'
-      break
-    }
-
-    case 'pca': {
-      const nComponents = Number(params.n_components || 2)
-      result.initCode.push(
-        `        self._pca_n_components_${safeToken(node.id)} = ${nComponents}`,
-        `        self._pca_mean_${safeToken(node.id)} = None`,
-        `        self._pca_components_${safeToken(node.id)} = None`
-      )
-      result.getitemCode.push(
-        `        # PCA (n_components=${nComponents})`,
-        `        if '_field_features' in locals():`,
-        `            if self._pca_components_${safeToken(node.id)} is not None:`,
-        `                _field_features = _field_features - self._pca_mean_${safeToken(node.id)}`,
-        `                _field_features = torch.matmul(_field_features, self._pca_components_${safeToken(node.id)})`
-      )
-      result.fieldTracking['features'] = '_field_features'
-      break
-    }
-
-    case 'normalize_features': {
-      const mean = String(params.mean || '0,0,0,0').split(',').map(Number)
-      const std = String(params.std || '1,1,1,1').split(',').map(Number)
-      result.getitemCode.push(
-        `        # Normalize Features (mean=${mean}, std=${std})`,
-        `        if '_field_features' in locals():`,
-        `            _mean_t = torch.tensor([${mean.join(', ')}], dtype=torch.float32)`,
-        `            _std_t = torch.tensor([${std.join(', ')}], dtype=torch.float32)`,
-        `            _std_t = torch.where(_std_t == 0, torch.ones_like(_std_t), _std_t)`,
-        `            _field_features = (_field_features - _mean_t) / _std_t`
-      )
-      result.fieldTracking['features'] = '_field_features'
-      break
-    }
-
-    case 'fill_missing_values': {
-      const strategy = pythonValue(params.strategy || 'mean')
-      const fillValue = Number(params.fill_value ?? 0)
-      result.getitemCode.push(
-        `        # Fill Missing Values (strategy=${strategy}, fill_value=${fillValue})`,
-        `        if '_field_features' in locals():`,
-        `            _mask = torch.isnan(_field_features) | torch.isinf(_field_features)`,
-        `            if _mask.any():`,
-        `                if ${strategy} == 'mean':`,
-        `                    _fill = _field_features[~_mask].mean()`,
-        `                elif ${strategy} == 'median':`,
-        `                    _fill = _field_features[~_mask].median()`,
-        `                elif ${strategy} == 'constant':`,
-        `                    _fill = ${fillValue}`,
-        `                else:`,
-        `                    _fill = 0.0`,
-        `                _field_features = torch.where(_mask, torch.tensor(_fill, dtype=_field_features.dtype), _field_features)`
-      )
-      result.fieldTracking['features'] = '_field_features'
-      break
-    }
-
-    case 'one_hot_encode': {
-      const columns = String(params.columns || 'category')
-      const numClasses = String(params.num_classes || '3')
-      const numClassesList = numClasses.split(',').map(Number)
-      result.getitemCode.push(
-        `        # One-Hot Encode (columns=${columns}, num_classes=${numClassesList})`,
-        `        if '_field_record' in locals() or '_field_features' in locals():`,
-        `            pass  # One-hot encoding scaffold: encode categorical columns in __init__ or preprocess`
-      )
-      break
-    }
-
     // === Data Organization ===
     case 'train_val_split': {
       const trainRatio = Number(params.train_ratio || 0.8)
@@ -1957,6 +1679,9 @@ export function compileDataWorkflow(
     .filter((binding) => binding.target === 'model_input')
     .map((binding) => ({ targetKey: binding.targetKey, sourceKey: binding.sourceKey }))
   const targetBindingSource = bindings.find((binding) => binding.target === 'training_target')?.sourceKey ?? null
+  const lossTargetBindings = bindings
+    .filter((binding) => binding.target === 'loss_target')
+    .map((binding) => ({ lossNodeId: binding.targetKey, sourceKey: binding.sourceKey }))
   const primaryModelInputKey = modelInputNames[0] ?? modelInputBindings[0]?.targetKey ?? null
 
   const warnings = [...graphWarnings]
@@ -1990,6 +1715,14 @@ export function compileDataWorkflow(
 
   if (bindings.some((binding) => binding.target === 'training_target') && !targetBindingSource) {
     warnings.push('训练目标绑定缺失，训练脚手架将自动生成占位标签。')
+  }
+
+  if (lossTargetBindings.length > 0) {
+    for (const lb of lossTargetBindings) {
+      if (!outputFieldSet.has(lb.sourceKey)) {
+        warnings.push(`Loss target binding 源字段 ${lb.sourceKey} 未在 Dataset Output 中声明。`)
+      }
+    }
   }
 
   const summaryLines = sortedNodes.map((node, index) => formatNodeSummary(node, index))
@@ -2109,6 +1842,9 @@ BOUND_MODEL_INPUTS = {
 ${bindingMapLines.join('\n')}
 }
 BOUND_TRAINING_TARGET = ${targetBindingSource ? JSON.stringify(targetBindingSource) : 'None'}
+BOUND_LOSS_TARGETS = {
+${lossTargetBindings.map((lb) => `    ${JSON.stringify(lb.lossNodeId)}: ${JSON.stringify(lb.sourceKey)},`).join('\n')}
+}
 PRIMARY_MODEL_INPUT_KEY = ${primaryModelInputKey ? JSON.stringify(primaryModelInputKey) : 'None'}
 ${dataLoaderConfigBlock}
 
@@ -2168,7 +1904,11 @@ def resolve_bound_inputs(batch, device):
     if BOUND_TRAINING_TARGET is not None:
         target = _coerce_bound_value(batch.get(BOUND_TRAINING_TARGET), device)
 
-    return model_feed, target
+    loss_targets = {}
+    for loss_node_id, source_key in BOUND_LOSS_TARGETS.items():
+        loss_targets[loss_node_id] = _coerce_bound_value(batch.get(source_key), device)
+
+    return model_feed, target, loss_targets
 
 def select_primary_model_input(model_feed, device, batch_size=None):
     if PRIMARY_MODEL_INPUT_KEY and PRIMARY_MODEL_INPUT_KEY in model_feed:
@@ -2184,6 +1924,7 @@ def select_primary_model_input(model_feed, device, batch_size=None):
     outputFields,
     modelInputBindings,
     targetBindingSource,
+    lossTargetBindings,
     primaryModelInputKey,
     warnings,
     summaryLines,

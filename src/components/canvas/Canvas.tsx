@@ -230,62 +230,44 @@ function FlowCanvas() {
     [structuralKey, features.multiOutput]
   )
 
-  // 多选高亮：选中的节点添加发光边框（只有多选时才高亮）
+  // 多选高亮 + 跨图高亮
   const selectedNodeIds = useGraphStore((s) => s.selectedNodeIds)
+  const highlightedNodeIds = useGraphStore((s) => s.highlightedNodeIds)
   const isMultiSelect = selectedNodeIds.length > 1
-  useEffect(() => {
-    // 只有多选时才应用高亮，单选不清高亮
-    if (!isMultiSelect) {
-      // 清除所有高亮
-      setNodes((nds) =>
-        nds.map((n: Node<NodeData>) => {
-          // 移除高亮样式
-          const { boxShadow: _, border: __, ...restStyle } = n.style || {}
-          return {
-            ...n,
-            style: restStyle,
-          }
-        }) as any
-      )
-      return
-    }
-    // 多选时应用高亮
-    setNodes((nds) =>
-      nds.map((n: Node<NodeData>) => {
-        const isSelected = selectedNodeIds.includes(n.id)
-        const branchIdx = branchAssignments[n.id]
-        const branchColor = branchIdx !== undefined ? BRANCH_COLORS[branchIdx % BRANCH_COLORS.length] : undefined
-        return {
-          ...n,
-          style: {
-            ...n.style,
-            ...(isSelected ? {
-              boxShadow: '0 0 12px rgba(99, 102, 241, 0.8)',
-              border: `2px solid ${branchColor || '#6366f1'}`,
-            } : {
-              boxShadow: n.style?.boxShadow || 'none',
-              border: branchColor ? `1px solid ${branchColor}` : n.style?.border,
-            }),
-          },
-        }
-      }) as any
-    )
-  }, [selectedNodeIds, branchAssignments, isMultiSelect])
 
-  // 给节点注入分支颜色（用于 BaseNode / 自定义节点边框）
-  useEffect(() => {
-    if (!features.multiOutput) return
-    setNodes((nds) =>
-      nds.map((n: Node<NodeData>) => {
-        const branchIdx = branchAssignments[n.id]
-        const color = branchIdx !== undefined ? BRANCH_COLORS[branchIdx % BRANCH_COLORS.length] : '#333'
-        return {
-          ...n,
-          style: { ...n.style, borderColor: color },
+  const styledNodes = useMemo(() => {
+    const highlightedSet = new Set(highlightedNodeIds)
+    return nodes.map((n: Node<NodeData>) => {
+      const isHighlighted = highlightedSet.has(n.id)
+      const isSelected = selectedNodeIds.includes(n.id)
+      const branchIdx = branchAssignments[n.id]
+      const branchColor = branchIdx !== undefined ? BRANCH_COLORS[branchIdx % BRANCH_COLORS.length] : undefined
+
+      const style: React.CSSProperties = { ...n.style }
+
+      if (isHighlighted) {
+        style.boxShadow = '0 0 16px rgba(255, 100, 100, 0.9)'
+        style.border = '2px solid #ff6688'
+      } else if (isMultiSelect && isSelected) {
+        style.boxShadow = '0 0 12px rgba(99, 102, 241, 0.8)'
+        style.border = `2px solid ${branchColor || '#6366f1'}`
+      } else {
+        if (style.boxShadow === '0 0 12px rgba(99, 102, 241, 0.8)' || style.boxShadow === '0 0 16px rgba(255, 100, 100, 0.9)') {
+          style.boxShadow = 'none'
         }
-      }) as any
-    )
-  }, [branchAssignments, features.multiOutput])
+        const borderStr = typeof style.border === 'string' ? style.border : ''
+        if (borderStr.includes('6366f1') || borderStr.includes('ff6688')) {
+          style.border = branchColor ? `1px solid ${branchColor}` : undefined
+        }
+      }
+
+      if (features.multiOutput && branchIdx !== undefined && !isHighlighted) {
+        style.borderColor = branchColor
+      }
+
+      return { ...n, style }
+    }) as any
+  }, [nodes, highlightedNodeIds, selectedNodeIds, branchAssignments, isMultiSelect, features.multiOutput])
 
   // 同步 ReactFlow 状态到 store (用户拖拽节点时)
   useEffect(() => {
@@ -486,7 +468,7 @@ function FlowCanvas() {
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%' }}>
       <ReactFlow
-        nodes={nodes}
+        nodes={styledNodes}
         edges={styledEdges as any}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

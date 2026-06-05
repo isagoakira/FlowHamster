@@ -10,11 +10,8 @@ const CATEGORY_STYLES: Record<string, { border: string; handleColor: string; lab
   field_ops: { border: '#6d5d8d', handleColor: '#9d7dff', labelColor: '#c4a7ff' },
   transforms: { border: '#8d6d3d', handleColor: '#ffaa44', labelColor: '#ffc87d' },
   augmentation: { border: '#8d3d6d', handleColor: '#ff44aa', labelColor: '#ff7dc4' },
-  advanced_aug: { border: '#8d3d4d', handleColor: '#ff4466', labelColor: '#ff7d99' },
   compose: { border: '#5d6d8d', handleColor: '#88aacc', labelColor: '#aaccff' },
   organization: { border: '#5d8d6d', handleColor: '#44ddaa', labelColor: '#7dffc4' },
-  multi_source: { border: '#4d6d8d', handleColor: '#44aaff', labelColor: '#7dbbff' },
-  feature_engineering: { border: '#6d4d8d', handleColor: '#aa66ff', labelColor: '#c499ff' },
   batch: { border: '#8d5d4d', handleColor: '#dd6644', labelColor: '#ffaa88' },
   nlp: { border: '#5d4d8d', handleColor: '#9966ff', labelColor: '#c499ff' },
   output: { border: '#3d5d8d', handleColor: '#4488ff', labelColor: '#88bbff' },
@@ -296,8 +293,18 @@ const DataPipelineNode = memo((props: NodeProps<DataNodeData>) => {
       <Handle
         type="source"
         position={Position.Right}
+        id="output"
         style={{ background: categoryStyle.handleColor, width: 8, height: 8, border: 'none' }}
       />
+      {data.nodeType === 'dataset_output' && outputFields.length > 0 && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="ground_truth"
+          style={{ background: '#ff6688', width: 8, height: 8, border: 'none', top: '75%' }}
+          title="ground_truth"
+        />
+      )}
     </div>
   )
 })

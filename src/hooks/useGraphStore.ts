@@ -234,6 +234,9 @@ interface GraphState {
   resetTrainingConfig: () => void
   setBindings: (bindings: WorkflowBinding[]) => void
   setWorkspaceMode: (mode: WorkspaceMode) => void
+  // Cross-graph highlighting
+  highlightedNodeIds: string[]
+  setHighlightedNodes: (nodeIds: string[]) => void
   // Package Viewer Dialog state (managed at Canvas level to avoid ReactFlow conflicts)
   packageViewerOpen: boolean
   packageViewerData: CustomCompositeNodeData | null
@@ -272,6 +275,7 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   trainingConfig: createDefaultTrainingConfig(),
   bindings: [],
   workspaceMode: 'model',
+  highlightedNodeIds: [],
   rfSetNodes: null,
   rfSetEdges: null,
   _history: [],
@@ -299,6 +303,8 @@ export const useGraphStore = create<GraphState>((set, get) => ({
   setBindings: (bindings) => set({ bindings }),
 
   setWorkspaceMode: (workspaceMode) => set({ workspaceMode }),
+
+  setHighlightedNodes: (highlightedNodeIds) => set({ highlightedNodeIds }),
 
   openPackageViewer: (nodeId, mode = 'view') => {
     const node = get().nodes.find((n) => n.id === nodeId)

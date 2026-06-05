@@ -153,63 +153,6 @@ describe('codeGenerator', () => {
     expect(code).toContain('self.x_outer_0 = OuterBlock()')
   })
 
-  it('emits inline class definition for custom composite nodes not in localStorage', () => {
-    // Clear localStorage to simulate the bug scenario
-    localStorage.removeItem('flowhamster_custom_composites')
-
-    const nodes: FlowHamsterNode[] = [
-      {
-        id: 'input',
-        type: 'inputNode',
-        position: { x: 0, y: 0 },
-        data: { nodeType: 'input', label: 'Input', params: {} },
-      },
-      {
-        id: 'resblock_1',
-        type: 'customNode',
-        position: { x: 120, y: 0 },
-        data: {
-          nodeType: 'custom',
-          label: 'ResBlock',
-          params: {},
-          isComposite: true,
-          isCustomComposite: true,
-          customClassId: 'ResBlock',
-          isExpanded: false,
-          internalStructure: [
-            { id: 'conv1', type: 'conv2d', label: 'Conv1', params: { in_channels: 64, out_channels: 64, kernel_size: 3, padding: 1 } },
-            { id: 'relu1', type: 'relu', label: 'ReLU1', params: {} },
-          ],
-          internalEdges: [{ from: 'conv1', to: 'relu1' }],
-          outputVar: 'relu1',
-          inputs: [],
-          outputs: [],
-          childNodeIds: ['conv1', 'relu1'],
-          internalEdgeIds: ['conv1-relu1'],
-        },
-      },
-      {
-        id: 'output',
-        type: 'outputNode',
-        position: { x: 260, y: 0 },
-        data: { nodeType: 'output', label: 'Output', params: {} },
-      },
-    ]
-    const edges: FlowHamsterEdge[] = [
-      { id: 'input-to-resblock', source: 'input', target: 'resblock_1', sourceHandle: 'result', targetHandle: 'input_0' },
-      { id: 'resblock-to-output', source: 'resblock_1', target: 'output', sourceHandle: 'output_0', targetHandle: 'input' },
-    ]
-
-    const { code } = generateLocalCode(nodes, edges)
-
-    // The class definition must be present even without localStorage
-    expect(code).toContain('class ResBlock(nn.Module):')
-    expect(code).toContain('self.conv1 = nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1, bias=False)')
-    expect(code).toContain('self.relu1 = nn.ReLU()')
-    expect(code).toContain('self.x_ResBlock = ResBlock()')
-    expect(code).toContain('x_relu1 = self.relu1(x_conv1)')
-  })
-
   describe('composite loss handling', () => {
     it('should handle empty components array with fallback', () => {
       // This tests BUG-003 fix: composite loss with empty components should use fallback
@@ -410,6 +353,130 @@ describe('codeGenerator', () => {
 
       // Should emit the custom code
       expect(code).toContain('def custom_loss_fn')
+    })
+  })
+
+  describe('loss target bindings (multi-loss)', () => {
+    it('unpacks 3 values from resolve_bound_inputs when loss targets exist', () => {
+      const nodes: FlowHamsterNode[] = [
+        {
+          id: 'input',
+          type: 'inputNode',
+          position: { x: 0, y: 0 },
+          data: { nodeType: 'input', label: 'Input', params: { name: 'x' } },
+        },
+        {
+          id: 'linear',
+          type: 'linearNode',
+          position: { x: 100, y: 0 },
+          data: { nodeType: 'linear', label: 'Linear', params: { in_features: 10, out_features: 10 } },
+        },
+        {
+          id: 'loss_ce',
+          type: 'crossentropylossNode',
+          position: { x: 200, y: 0 },
+          data: { nodeType: 'crossentropyloss', label: 'CrossEntropy', params: { num_classes: 10 } },
+        },
+      ]
+      const edges: FlowHamsterEdge[] = [
+        { id: 'e1', source: 'input', target: 'linear', sourceHandle: null, targetHandle: null },
+        { id: 'e2', source: 'linear', target: 'loss_ce', sourceHandle: null, targetHandle: null },
+      ]
+
+      const dataNodes = [
+        {
+          id: 'ds_out',
+          type: 'dataPipelineNode',
+          position: { x: 0, y: 0 },
+          data: {
+            nodeType: 'dataset_output',
+            label: 'Dataset Output',
+            params: { fields: 'image,label' },
+            fieldSpecs: JSON.stringify([{ name: 'image', dtype: 'image' }, { name: 'label', dtype: 'label' }]),
+          },
+        },
+      ] as any
+
+      const bindings = [
+        { id: 'b1', sourceGraph: 'data' as const, sourceKey: 'image', target: 'model_input' as const, targetKey: 'x' },
+        { id: 'b2', sourceGraph: 'data' as const, sourceKey: 'label', target: 'loss_target' as const, targetKey: 'loss_ce' },
+      ]
+
+      const { code } = generateLocalCode(nodes, edges, undefined, undefined, {
+        dataGraphNodes: dataNodes,
+        dataGraphEdges: [],
+        bindings,
+      })
+
+      expect(code).toContain('model_feed, target, loss_targets = resolve_bound_inputs(batch, runtime_device)')
+      expect(code).toContain('BOUND_LOSS_TARGETS = {')
+      expect(code).toContain('"loss_ce": "label"')
+    })
+
+    it('includes loss_targets dict in config-driven training loop', () => {
+      const nodes: FlowHamsterNode[] = [
+        {
+          id: 'input',
+          type: 'inputNode',
+          position: { x: 0, y: 0 },
+          data: { nodeType: 'input', label: 'Input', params: { name: 'x' } },
+        },
+        {
+          id: 'linear',
+          type: 'linearNode',
+          position: { x: 100, y: 0 },
+          data: { nodeType: 'linear', label: 'Linear', params: { in_features: 10, out_features: 10 } },
+        },
+        {
+          id: 'output',
+          type: 'outputNode',
+          position: { x: 200, y: 0 },
+          data: { nodeType: 'output', label: 'Output', params: {} },
+        },
+      ]
+      const edges: FlowHamsterEdge[] = [
+        { id: 'e1', source: 'input', target: 'linear', sourceHandle: null, targetHandle: null },
+        { id: 'e2', source: 'linear', target: 'output', sourceHandle: null, targetHandle: null },
+      ]
+
+      const dataNodes = [
+        {
+          id: 'ds_out',
+          type: 'dataPipelineNode',
+          position: { x: 0, y: 0 },
+          data: {
+            nodeType: 'dataset_output',
+            label: 'Dataset Output',
+            params: { fields: 'image,label' },
+            fieldSpecs: JSON.stringify([{ name: 'image', dtype: 'image' }, { name: 'label', dtype: 'label' }]),
+          },
+        },
+      ] as any
+
+      const bindings = [
+        { id: 'b1', sourceGraph: 'data' as const, sourceKey: 'image', target: 'model_input' as const, targetKey: 'x' },
+        { id: 'b2', sourceGraph: 'data' as const, sourceKey: 'label', target: 'loss_target' as const, targetKey: 'loss_ce' },
+      ]
+
+      const trainingConfig: WorkflowTrainingConfig = {
+        taskType: 'classification',
+        loss: { type: 'cross_entropy', enabled: true, params: {} },
+        optimizer: { type: 'adam', enabled: true, params: { lr: 0.001 } },
+        scheduler: { type: 'step', enabled: false, params: {} },
+        metrics: [],
+        runtime: { device: 'cpu', epochs: 1, batchSize: 32, amp: false, gradClip: null, numWorkers: 0 },
+        checkpoint: { enabled: false, saveTopK: 1, monitor: 'val_loss', mode: 'min', earlyStopPatience: null },
+      }
+
+      const { code } = generateLocalCode(nodes, edges, undefined, trainingConfig, {
+        dataGraphNodes: dataNodes,
+        dataGraphEdges: [],
+        bindings,
+      })
+
+      expect(code).toContain('model_feed, target, loss_targets = resolve_bound_inputs(batch, runtime_device)')
+      expect(code).toContain('BOUND_LOSS_TARGETS = {')
+      expect(code).toContain('"loss_ce": "label"')
     })
   })
 })

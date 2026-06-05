@@ -1,4 +1,4 @@
-import { DragEvent, useCallback } from 'react'
+import { DragEvent, useCallback, useMemo } from 'react'
 import ReactFlow, { Background, Controls, MiniMap, NodeTypes, ReactFlowProvider, useReactFlow } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { useDataGraphStore } from '../../hooks/useDataGraphStore'
@@ -16,7 +16,25 @@ function DataCanvasInner() {
   const onEdgesChange = useDataGraphStore((s) => s.onEdgesChange)
   const onConnect = useDataGraphStore((s) => s.onConnect)
   const addNode = useDataGraphStore((s) => s.addNode)
+  const highlightedNodeIds = useDataGraphStore((s) => s.highlightedNodeIds)
   const { screenToFlowPosition } = useReactFlow()
+
+  const styledNodes = useMemo(() => {
+    const highlightedSet = new Set(highlightedNodeIds)
+    return nodes.map((n) => {
+      const isHighlighted = highlightedSet.has(n.id)
+      return {
+        ...n,
+        style: {
+          ...n.style,
+          ...(isHighlighted ? {
+            boxShadow: '0 0 16px rgba(255, 100, 100, 0.9)',
+            border: '2px solid #ff6688',
+          } : {}),
+        },
+      }
+    })
+  }, [nodes, highlightedNodeIds])
 
   const onDragOver = useCallback((event: DragEvent) => {
     event.preventDefault()
@@ -44,7 +62,7 @@ function DataCanvasInner() {
         Data Graph — 独立于模型图，仅声明数据流与输出契约
       </div>
       <ReactFlow
-        nodes={nodes}
+        nodes={styledNodes}
         edges={edges}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}

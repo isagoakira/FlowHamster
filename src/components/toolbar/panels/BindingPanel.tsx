@@ -31,6 +31,19 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
       }))
   ), [modelNodes])
 
+  // Loss nodes that can be bound individually
+  const lossNodes = useMemo(() => (
+    modelNodes
+      .filter((node) =>
+        ['crossentropyloss', 'mseloss', 'focalloss', 'labelsmoothing'].includes(node.data.nodeType)
+      )
+      .map((node) => ({
+        id: node.id,
+        label: node.data.label,
+        nodeType: node.data.nodeType,
+      }))
+  ), [modelNodes])
+
   // Get data output fields with their dtype info
   const dataOutputs = useMemo(() => {
     const outputs: Array<{ field: string; dtype?: FieldDtype; shapeHint?: string }> = []
@@ -96,6 +109,61 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
 
   const getBindingValue = (target: WorkflowBinding['target'], targetKey: string) =>
     bindings.find((binding) => binding.target === target && binding.targetKey === targetKey)?.sourceKey ?? ''
+
+  const getLossBindingValue = (lossNodeId: string) =>
+    bindings.find((binding) => binding.target === 'loss_target' && binding.targetKey === lossNodeId)?.sourceKey ?? ''
+
+  const setLossBindingValue = (lossNodeId: string, sourceKey: string) => {
+    const next = bindings.filter((binding) => !(binding.target === 'loss_target' && binding.targetKey === lossNodeId))
+    if (sourceKey) {
+      next.push({
+        id: `loss_target:${lossNodeId}`,
+        sourceGraph: 'data',
+        sourceKey,
+        target: 'loss_target',
+        targetKey: lossNodeId,
+      })
+    }
+    setBindings(next)
+  }
+
+  // Cross-graph highlighting helpers
+  const setModelHighlightedNodes = useGraphStore((s) => s.setHighlightedNodes)
+  const setDataHighlightedNodes = useDataGraphStore((s) => s.setHighlightedNodes)
+
+  const highlightBinding = (target: WorkflowBinding['target'], targetKey: string, sourceKey: string) => {
+    const modelNodeIds: string[] = []
+    const dataNodeIds: string[] = []
+
+    if (target === 'model_input') {
+      const inputNode = modelNodes.find((n) => n.data.nodeType === 'input' && String(n.data.params.name || '') === targetKey)
+      if (inputNode) modelNodeIds.push(inputNode.id)
+    } else if (target === 'loss_target') {
+      const lossNode = modelNodes.find((n) => n.id === targetKey)
+      if (lossNode) modelNodeIds.push(lossNode.id)
+    } else if (target === 'training_target') {
+      modelNodes
+        .filter((n) => ['crossentropyloss', 'mseloss', 'focalloss', 'labelsmoothing'].includes(n.data.nodeType))
+        .forEach((n) => modelNodeIds.push(n.id))
+    }
+
+    if (sourceKey) {
+      dataNodes.forEach((n) => {
+        if (n.data.nodeType === 'dataset_output') {
+          const fields = String(n.data.params.fields || '').split(',').map((f) => f.trim()).filter(Boolean)
+          if (fields.includes(sourceKey)) dataNodeIds.push(n.id)
+        }
+      })
+    }
+
+    setModelHighlightedNodes(modelNodeIds)
+    setDataHighlightedNodes(dataNodeIds)
+  }
+
+  const clearHighlight = () => {
+    setModelHighlightedNodes([])
+    setDataHighlightedNodes([])
+  }
 
   const bindingStatus = useMemo(() => (
     compileDataWorkflow(modelNodes as any, dataNodes as any, dataEdges as any, bindings, trainingConfig)
@@ -185,6 +253,26 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
       }
     }
 
+    // Auto-bind loss nodes to target/label fields
+    for (const lossNode of lossNodes) {
+      const hasLossBinding = bindings.some(b => b.target === 'loss_target' && b.targetKey === lossNode.id)
+      if (hasLossBinding) continue
+      const targetField = dataOutputs.find(d =>
+        d.field.toLowerCase().includes('label') ||
+        d.field.toLowerCase().includes('target') ||
+        d.field.toLowerCase().includes('class')
+      )
+      if (targetField) {
+        newBindings.push({
+          id: `loss_target:${lossNode.id}`,
+          sourceGraph: 'data',
+          sourceKey: targetField.field,
+          target: 'loss_target',
+          targetKey: lossNode.id,
+        })
+      }
+    }
+
     setBindings(newBindings)
   }
 
@@ -222,8 +310,21 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
       }
     }
 
+    // Suggest loss node bindings
+    for (const lossNode of lossNodes) {
+      if (bindings.some(b => b.target === 'loss_target' && b.targetKey === lossNode.id)) continue
+      const targetField = dataOutputs.find(d =>
+        d.field.toLowerCase().includes('label') ||
+        d.field.toLowerCase().includes('target') ||
+        d.field.toLowerCase().includes('class')
+      )
+      if (targetField) {
+        suggestions.push({ target: 'loss_target' as any, targetKey: lossNode.id, sourceKey: targetField.field, matchType: 'exact' })
+      }
+    }
+
     return suggestions
-  }, [modelInputs, dataOutputs, bindings])
+  }, [modelInputs, dataOutputs, bindings, lossNodes])
 
   // Count errors and warnings
   const errorCount = bindingValidations.filter(v => !v.isCompatible && v.error).length
@@ -275,10 +376,14 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
                 onClick={() => {
                   if (s.target === 'model_input') {
                     setBindingValue('model_input', s.targetKey, s.sourceKey)
-                  } else {
+                  } else if (s.target === 'training_target') {
                     setBindingValue('training_target', s.targetKey, s.sourceKey)
+                  } else if (s.target === 'loss_target') {
+                    setLossBindingValue(s.targetKey, s.sourceKey)
                   }
                 }}
+                onMouseEnter={() => highlightBinding(s.target as WorkflowBinding['target'], s.targetKey, s.sourceKey)}
+                onMouseLeave={clearHighlight}
                 style={{
                   padding: '3px 8px',
                   fontSize: '10px',
@@ -350,8 +455,14 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
         <>
           {modelInputs.map((input) => {
             const validation = getBindingValidation('model_input', input.key)
+            const boundSource = getBindingValue('model_input', input.key)
             return (
-              <div key={input.key} style={fieldGroupStyle}>
+              <div
+                key={input.key}
+                style={fieldGroupStyle}
+                onMouseEnter={() => highlightBinding('model_input', input.key, boundSource)}
+                onMouseLeave={clearHighlight}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
                   <label style={labelStyle}>Model Input · {input.key}</label>
                   {validation && !validation.isCompatible && validation.error && (
@@ -389,7 +500,14 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
             )
           })}
 
-          <div style={fieldGroupStyle}>
+          <div
+            style={fieldGroupStyle}
+            onMouseEnter={() => {
+              const source = getBindingValue('training_target', 'label')
+              highlightBinding('training_target', 'label', source)
+            }}
+            onMouseLeave={clearHighlight}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
               <label style={labelStyle}>Training Target · label</label>
               {(() => {
@@ -427,6 +545,60 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
               ))}
             </select>
           </div>
+
+          {/* Loss Target Bindings */}
+          {lossNodes.length > 0 && (
+            <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed #5a2a2a' }}>
+              <div style={{ fontSize: '11px', fontWeight: 700, color: '#ff8888', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ff4444', display: 'inline-block' }} />
+                Loss Target Bindings
+              </div>
+              {lossNodes.map((lossNode) => {
+                const boundSource = getLossBindingValue(lossNode.id)
+                return (
+                  <div
+                    key={lossNode.id}
+                    style={{ ...fieldGroupStyle, borderColor: boundSource ? '#5a2a2a' : '#333' }}
+                    onMouseEnter={() => highlightBinding('loss_target', lossNode.id, boundSource)}
+                    onMouseLeave={clearHighlight}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+                      <label style={{ ...labelStyle, color: '#ffaaaa' }}>{lossNode.label} · target</label>
+                      {boundSource && (
+                        <span style={{
+                          fontSize: '10px',
+                          color: '#ff8888',
+                          background: '#1a0f0f',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          border: '1px solid #5a2a2a',
+                        }}>
+                          loss binding
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      style={{
+                        ...inputStyle,
+                        borderStyle: boundSource ? 'dashed' : 'solid',
+                        borderColor: boundSource ? '#8b4444' : '#333',
+                        background: boundSource ? '#1a0f0f' : '#0f1318',
+                      }}
+                      value={boundSource}
+                      onChange={(e) => setLossBindingValue(lossNode.id, e.target.value)}
+                    >
+                      <option value="">-- Select target field --</option>
+                      {dataOutputs.map(({ field, dtype, shapeHint }) => (
+                        <option key={field} value={field}>
+                          {field} {dtype ? `[${dtype}${shapeHint ? `:${shapeHint}` : ''}]` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -456,8 +628,17 @@ export function BindingPanel({ onClose }: BindingPanelProps) {
                     borderRadius: '3px',
                     border: `1px solid ${isBound ? '#448844' : getDtypeColor(dtype)}44`,
                     opacity: isBound ? 0.7 : 1,
+                    cursor: 'pointer',
                   }}
                   title={isBound ? '已绑定' : dtype}
+                  onMouseEnter={() => {
+                    const dataNodeIds = dataNodes
+                      .filter((n) => n.data.nodeType === 'dataset_output')
+                      .filter((n) => String(n.data.params.fields || '').split(',').map((f) => f.trim()).filter(Boolean).includes(field))
+                      .map((n) => n.id)
+                    setDataHighlightedNodes(dataNodeIds)
+                  }}
+                  onMouseLeave={clearHighlight}
                 >
                   {isBound && '✓ '}{field}:{dtype}
                 </span>

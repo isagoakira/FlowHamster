@@ -185,6 +185,7 @@ export function generateLocalCode(
   // ── Loss / Optimizer initialization
   const lossInitLines: string[] = []
   const lossFwdLines: string[] = []
+  const hasLossTargets = (dataWorkflow.lossTargetBindings?.length ?? 0) > 0
 
   for (const block of lossBlocks) {
     const li = genLossInit(block)
@@ -200,7 +201,11 @@ export function generateLocalCode(
     const upstreamVar = upstreamOutputName
       ? `${upstreamOutputName}_var`
       : (upstreamBlock?.outputVar ?? 'x')
-    const lf = genLossForward(block, upstreamVar)
+    const lossBinding = dataWorkflow.lossTargetBindings?.find(lb => lb.lossNodeId === block.nodeId)
+    const targetExpr = lossBinding
+      ? `loss_targets.get(${JSON.stringify(block.nodeId)})`
+      : (hasLossTargets ? `loss_targets.get(${JSON.stringify(block.nodeId)})` : 'target')
+    const lf = genLossForward(block, upstreamVar, targetExpr)
     if (lf) lossFwdLines.push(`  ${lf}`)
   }
 
@@ -214,10 +219,11 @@ export function generateLocalCode(
   const workflowRuntimePrelude = dataWorkflow.hasWorkflowRuntime
     ? `    runtime_device = device if device != "auto" else "cpu"
     batch = build_demo_batch(runtime_device)
-    model_feed, target = resolve_bound_inputs(batch, runtime_device)
+    model_feed, target, loss_targets = resolve_bound_inputs(batch, runtime_device)
     x = select_primary_model_input(model_feed, runtime_device, target.shape[0] if torch.is_tensor(target) and target.dim() > 0 else None)`
     : `    runtime_device = device if device != "auto" else "cpu"
     target = None
+    loss_targets = {}
     x = torch.randn(1, 3, 224, 224, device=runtime_device)`
 
   // Evaluation code
@@ -245,6 +251,9 @@ export function generateLocalCode(
     const configTrainLines = removeLegacyTrainingSummary(configDrivenTraining?.trainLines ?? [])
     const configTrain = configTrainLines.join('\n')
     if (configDrivenTraining && dataWorkflow.hasWorkflowRuntime) {
+      const resolveLine = hasLossTargets
+        ? '            model_feed, target, loss_targets = resolve_bound_inputs(batch, runtime_device)'
+        : '            model_feed, target = resolve_bound_inputs(batch, runtime_device)'
       mainBlock = `
 if __name__ == "__main__":
     model = FlowHamsterModel()
@@ -254,7 +263,7 @@ if __name__ == "__main__":
 ${configSetup ? `${configSetup}\n` : ''}    loader = build_flowhamster_dataloader()
     for epoch in range(${trainingConfig?.runtime?.epochs ?? 1}):
         for step, batch in enumerate(loader, start=1):
-            model_feed, target = resolve_bound_inputs(batch, runtime_device)
+${resolveLine}
             x = select_primary_model_input(model_feed, runtime_device, target.shape[0] if torch.is_tensor(target) and target.dim() > 0 else None)
             ${returnVarsDecl}
 ${indentPythonLines([primaryOutputLine], 8)}
@@ -343,40 +352,10 @@ ${workflowRuntimePrelude}
   }
 
   let customClassesBlock = ''
-  const emittedClassNames = new Set<string>()
-
   for (const cls of customClasses) {
     // 检查 cls.id（原始注册ID）、cls.name（模块名）、custom_${cls.name}（前缀形式）
     if (customClassIdsUsed.has(cls.id) || customClassIdsUsed.has(cls.name) || customClassIdsUsed.has(`custom_${cls.name}`)) {
-      const className = safePythonName(cls.name)
-      if (!emittedClassNames.has(className)) {
-        customClassesBlock += `\n\n${generateCustomClassCode(cls)}`
-        emittedClassNames.add(className)
-      }
-    }
-  }
-
-  // Also generate inline class definitions for custom nodes with internalStructure
-  // that are not available in localStorage (or to ensure they're always emitted)
-  for (const block of modelBlocks) {
-    const hasInternalStructure = block.fields?.internalStructure && Array.isArray(block.fields.internalStructure) && block.fields.internalStructure.length > 0
-    if (!hasInternalStructure) continue
-
-    if (block.opType === 'custom' || block.opType.startsWith('custom_')) {
-      const className = block.opType === 'custom'
-        ? safePythonName(block.fields?.customClassId || block.nodeId)
-        : safePythonName(block.opType)
-
-      if (!emittedClassNames.has(className)) {
-        const inlineCode = generateCustomClassCodeFromData(
-          className,
-          block.fields.internalStructure,
-          block.fields.internalEdges || [],
-          block.fields.outputVar || 'output'
-        )
-        customClassesBlock += `\n\n${inlineCode}`
-        emittedClassNames.add(className)
-      }
+      customClassesBlock += `\n\n${generateCustomClassCode(cls)}`
     }
   }
 
@@ -407,7 +386,6 @@ ${workflowRuntimePrelude}
 }
 
 // Import these at the bottom to avoid circular dependencies
-import { generateCustomClassCode, generateCustomClassCodeFromData, getAllCustomClasses } from './customCompositeRegistry'
-import { safePythonName } from './pythonNodeRegistry'
+import { generateCustomClassCode, getAllCustomClasses } from './customCompositeRegistry'
 import { getCompositeNodeDef } from './nodeRegistry'
 import { WorkflowBinding } from '../schema/workflowDocument'

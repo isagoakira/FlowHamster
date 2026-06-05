@@ -18,11 +18,15 @@ interface DataGraphState {
   setNodes: (nodes: DataFlowNode[]) => void
   setEdges: (edges: DataFlowEdge[]) => void
   loadGraph: (nodes: DataFlowNode[], edges: DataFlowEdge[]) => void
+  // Cross-graph highlighting
+  highlightedNodeIds: string[]
+  setHighlightedNodes: (nodeIds: string[]) => void
 }
 
 export const useDataGraphStore = create<DataGraphState>((set) => ({
   nodes: [],
   edges: [],
+  highlightedNodeIds: [],
   onNodesChange: (changes) => set((state) => ({ nodes: applyNodeChanges(changes, state.nodes) as DataFlowNode[] })),
   onEdgesChange: (changes) => set((state) => ({ edges: applyEdgeChanges(changes, state.edges) as DataFlowEdge[] })),
   onConnect: (connection) => set((state) => ({ edges: addEdge({ ...connection, type: 'smoothstep', animated: true }, state.edges) as DataFlowEdge[] })),
@@ -46,4 +50,5 @@ export const useDataGraphStore = create<DataGraphState>((set) => ({
   setNodes: (nodes) => set({ nodes }),
   setEdges: (edges) => set({ edges }),
   loadGraph: (nodes, edges) => set({ nodes, edges }),
+  setHighlightedNodes: (highlightedNodeIds) => set({ highlightedNodeIds }),
 }))
